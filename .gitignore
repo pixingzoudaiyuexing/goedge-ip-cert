@@ -23,17 +23,17 @@ credentials/
 *.pfx
 *.secret
 
-state/
-account/
-rollback/
-outputs/
-tmp/
+/state/
+/account/
+/rollback/
+/outputs/
+/tmp/
 
 bin/
 build/
-dist/
-dist-stage2.1/
-release/
+/dist/
+/dist-stage2.1/
+/release/
 
 coverage.out
 *.log

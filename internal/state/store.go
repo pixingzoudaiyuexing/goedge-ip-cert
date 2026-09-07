@@ -409,6 +409,18 @@ func (s *Store) ListManaged(ctx context.Context) ([]ManagedCert, error) {
 	return items, nil
 }
 
+func (s *Store) LatestOperation(ctx context.Context, ip string) (Operation, error) {
+	var id string
+	err := s.db.QueryRowContext(ctx, `SELECT id FROM operations WHERE ipv4=? ORDER BY updated_at DESC LIMIT 1`, ip).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Operation{}, ErrNotFound
+	}
+	if err != nil {
+		return Operation{}, err
+	}
+	return s.Operation(ctx, id)
+}
+
 func (s *Store) RecordManagedError(ctx context.Context, ip, category, message, marker string) error {
 	result, err := s.db.ExecContext(ctx, `UPDATE managed_certs SET state=?, last_error_category=?, last_error=?, recovery_marker=? WHERE ipv4=?`,
 		StateError, category, message, marker, ip)

@@ -1,0 +1,14 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Public RSA key-type constant is not a credential"
+regexTarget = "line"
+paths = ['''internal/acme/issuer\.go''']
+regexes = ['''config\.Certificate\.KeyType = certcrypto\.RSA2048''']
+
+[[allowlists]]
+description = "Synthetic PEM marker verifies SQLite never persists private keys"
+regexTarget = "line"
+paths = ['''internal/state/store_test\.go''']
+regexes = ['''stage2-1-private-key-probe''']

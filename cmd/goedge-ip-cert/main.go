@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 	acmeclient "github.com/pixingzoudaiyuexing/goedge-ip-cert/internal/acme"
+	"github.com/pixingzoudaiyuexing/goedge-ip-cert/internal/bootstrap"
 	"github.com/pixingzoudaiyuexing/goedge-ip-cert/internal/challenge"
 	"github.com/pixingzoudaiyuexing/goedge-ip-cert/internal/config"
 	"github.com/pixingzoudaiyuexing/goedge-ip-cert/internal/goedge"
@@ -28,6 +29,7 @@ import (
 )
 
 const defaultConfigPath = "/etc/goedge-ip-cert/config.yaml"
+const version = "v0.1.0-preview.2"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -38,9 +40,28 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("用法: goedge-ip-cert <validate-config|status|run-once> [参数]")
+		return errors.New("用法: goedge-ip-cert <version|validate-config|status|discover-websites|target-status|bootstrap-db|run-once> [参数]")
 	}
 	switch args[0] {
+	case "version":
+		fmt.Fprintln(os.Stdout, version)
+		return nil
+	case "bootstrap-db":
+		flags := flag.NewFlagSet("bootstrap-db", flag.ContinueOnError)
+		path := flags.String("goedge-db-config", "", "GoEdge db.yaml")
+		output := flags.String("output", "/etc/goedge-ip-cert/credentials/mysql-dsn", "专用 DSN 文件")
+		databaseOutput := flags.String("database-output", "", "非敏感数据库名文件")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *path == "" {
+			return errors.New("必须指定 --goedge-db-config")
+		}
+		return bootstrap.InitializeDatabase(context.Background(), *path, *output, *databaseOutput)
+	case "discover-websites":
+		return discoverWebsites(args[1:])
+	case "target-status":
+		return targetStatus(args[1:])
 	case "validate-config":
 		flags := flag.NewFlagSet("validate-config", flag.ContinueOnError)
 		path := flags.String("config", defaultConfigPath, "配置文件")

@@ -2,7 +2,7 @@
 
 独立的 GoEdge 公网 IPv4 证书集成服务，通过 Let's Encrypt ACME `ip` identifier、`shortlived` profile 和 HTTP-01，为 GoEdge Server 签发并自动续期受信任的 IPv4 HTTPS 证书。
 
-> **Status: Preview (`v0.1.0-preview.1`)**
+> **Status: Preview (`v0.1.0-preview.2`)**
 >
 > 已在隔离测试 Node / Cluster 上真实验证 Let's Encrypt Production IPv4签发、HTTP-01、系统信任 TLS、同 Cert ID续期、GoEdge Node refresh和 Cluster隔离。多日无人值守自然续期 runtime acceptance仍在进行中。请先在独立测试 Node / Cluster 使用，不要视为 Stable或 Production Ready。
 
@@ -44,11 +44,45 @@ Public IPv4
 
 Cert Manager建议与 EdgeAPI/MySQL运行在同一 Control Server，仅通过 loopback访问 REST和 MySQL。它不需要部署到 EdgeNode。
 
+## 一键安装与管理
+
+支持 Debian 12、systemd、Linux amd64 / arm64。请先在 GoEdge 中配置好 Node / Cluster，并创建“域名”为单个公网 IPv4 的网站，然后以 root 运行：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/pixingzoudaiyuexing/goedge-ip-cert/main/install.sh)
+```
+
+中文管理器固定提供安装、申请证书、状态、日志、更新、备份/恢复和卸载七项功能。正常安装只要求输入 GoEdge REST Access Key 与 REST Access Token；Token 使用隐藏输入。GoEdge v1.3.9 的 API 实际把这两项作为 `accessKeyId` 与长期 Access Key secret，Cert Manager 再换取短期 API token，短期 token 不会落盘。
+
+安装器自动发现 GoEdge EdgeAPI 的 `db.yaml`，创建 `goedge_ip_cert@127.0.0.1`，并且只授予：
+
+```sql
+SELECT, INSERT, DELETE
+ON <GOEDGE_DATABASE>.edgeACMEAuthentications
+```
+
+如果无法合法读取现有 GoEdge DB 管理连接，或不能确认上述精确权限，安装会以 `AUTO_DB_INITIALIZATION_FAILED` 关闭，不会要求用户输入或复用高权限 runtime credential。初次安装只启用空目标的 hourly timer，不创建 ACME order。
+
+## 用户流程
+
+```text
+安装 GoEdge 1.3.9
+  -> 配置 Cluster / Node
+  -> 创建单公网 IPv4 网站并启用 HTTPS Policy
+  -> 运行 install.sh
+  -> 菜单选择网站并检查 dry-run
+  -> 确认后申请 Let's Encrypt Production shortlived 证书
+  -> 在 EdgeAdmin 手工绑定一次 Cert 到 Policy
+  -> 后续 hourly timer 更新同一个 Cert ID
+```
+
+Server、Policy、Node、Cluster、Cert ID 都由只读 REST 发现，用户无需输入内部 ID。每个 IPv4 使用独立配置、SQLite state、ACME account 与 rollback 目录；全局锁保证多个目标串行处理，不会并发下单。
+
 ## Preview支持范围
 
 支持：
 
-- 单个规范公网 IPv4
+- 每张证书一个规范公网 IPv4，可管理多个独立目标
 - Let's Encrypt Production或 Staging
 - ACME HTTP-01
 - `shortlived` profile
@@ -92,17 +126,7 @@ GoEdge v1.3.9的 Policy update是无 revision/CAS的整对象覆盖。自动 rea
 
 ## 安装
 
-完整步骤见 [安装指南](docs/INSTALL.md)。建议顺序：
-
-1. 创建只允许 `edgeACMEAuthentications` 的最小 MySQL用户；
-2. 在 GoEdge创建专用 REST credential；
-3. 创建独立 Node Cluster、Server与空 SSL Policy；
-4. 安装 binary、non-root用户、配置和 credential files；
-5. `validate-config` 与默认 dry-run；
-6. 显式 `--apply`签发；
-7. 在 EdgeAdmin手工首次绑定 Cert ID；
-8. 再次运行并严格验证 TLS；
-9. 最后安装/启用 systemd timer。
+完整的自动安装、首次人工绑定、多目标状态、更新、备份/恢复和卸载边界见 [安装指南](docs/INSTALL.md)。高级用户仍可直接使用下方 core CLI。
 
 ## 命令
 
@@ -169,7 +193,7 @@ ON <GOEDGE_DATABASE>.edgeACMEAuthentications
 
 ## 开发验证
 
-兼容基线：Go 1.22.12、lego v4.22.2、GoEdge v1.3.9。
+兼容基线：Go language 1.22、release toolchain Go 1.26.6、lego v4.22.2、GoEdge v1.3.9。
 
 ```bash
 go mod verify

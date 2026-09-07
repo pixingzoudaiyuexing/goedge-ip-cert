@@ -119,6 +119,7 @@ type fakeAPI struct {
 	nextCertID       int64
 	certs            map[int64]CertificateConfig
 	servers          []serverResponse
+	nodes            map[int64][]nodeResponse
 	policy           SSLPolicy
 	authFailure      bool
 	authErrorMessage string
@@ -128,8 +129,14 @@ type fakeAPI struct {
 	mutateOnRead     int
 }
 
+type nodeResponse struct {
+	IsInstalled bool `json:"isInstalled"`
+	IsOn        bool `json:"isOn"`
+	IsUp        bool `json:"isUp"`
+}
+
 func newFakeAPI(t *testing.T) *fakeAPI {
-	f := &fakeAPI{t: t, nextCertID: 40, certs: map[int64]CertificateConfig{}, policy: SSLPolicy{
+	f := &fakeAPI{t: t, nextCertID: 40, certs: map[int64]CertificateConfig{}, nodes: map[int64][]nodeResponse{}, policy: SSLPolicy{
 		ID: 9, IsOn: true, CertRefs: []SSLCertRef{{IsOn: true, CertID: 7}}, ClientAuthType: 4,
 		ClientCARefs: []SSLCertRef{{IsOn: true, CertID: 8}}, MinVersion: "TLS 1.2",
 		CipherSuitesIsOn: true, CipherSuites: []string{"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"},
@@ -248,6 +255,12 @@ func (f *fakeAPI) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		writeEnvelope(f.t, w, 200, "ok", map[string]any{"servers": f.servers})
 	case "/ServerService/countAllEnabledServersMatch":
 		writeEnvelope(f.t, w, 200, "ok", map[string]any{"count": len(f.servers)})
+	case "/NodeService/listEnabledNodesMatch":
+		var request struct {
+			NodeClusterID int64 `json:"nodeClusterId"`
+		}
+		decodeBody(f.t, r, &request)
+		writeEnvelope(f.t, w, 200, "ok", map[string]any{"nodes": f.nodes[request.NodeClusterID]})
 	case "/SSLPolicyService/findEnabledSSLPolicyConfig":
 		f.policyReads++
 		if f.mutateOnRead == f.policyReads {
@@ -303,6 +316,33 @@ func TestDiscoverServerFiltersBroadSearchAndFailsClosed(t *testing.T) {
 	_, err = f.client(time.Second).DiscoverServer(context.Background(), "8.8.8.8")
 	if !errors.Is(err, ErrMultipleServers) {
 		t.Fatalf("multiple match error=%v", err)
+	}
+}
+
+func TestListEligibleWebsitesFiltersAndReportsNodeState(t *testing.T) {
+	f := newFakeAPI(t)
+	f.nodes[7] = []nodeResponse{{IsInstalled: true, IsOn: true, IsUp: true}}
+	f.nodes[8] = []nodeResponse{{IsInstalled: true, IsOn: true, IsUp: false}}
+	f.servers = []serverResponse{
+		websiteFixture(t, 1, "eligible\x1b[31m", []ServerName{{Name: "8.8.8.8"}}, 9, 7, "edge-a\n"),
+		websiteFixture(t, 2, "private", []ServerName{{Name: "10.0.0.1"}}, 9, 7, "edge-a"),
+		websiteFixture(t, 3, "multiple", []ServerName{{Name: "1.1.1.1"}, {Name: "example.com"}}, 9, 7, "edge-a"),
+		websiteFixture(t, 4, "offline", []ServerName{{Name: "9.9.9.9"}}, 10, 8, "edge-b"),
+		websiteFixture(t, 5, "no-node", []ServerName{{Name: "1.0.0.1"}}, 11, 9, "edge-c"),
+		websiteFixture(t, 6, "non-full", []ServerName{{Name: "4.4.4.4", Type: "match"}}, 9, 7, "edge-a"),
+		websiteFixture(t, 7, "ambiguous-a", []ServerName{{Name: "1.1.1.1"}}, 9, 7, "edge-a"),
+		websiteFixture(t, 8, "ambiguous-b", []ServerName{{Name: "1.1.1.1"}}, 9, 7, "edge-a"),
+	}
+	websites, err := f.client(time.Second).ListEligibleWebsites(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(websites) != 2 || websites[0].IPv4 != "8.8.8.8" || !websites[0].NodeOnline ||
+		websites[1].IPv4 != "9.9.9.9" || websites[1].NodeOnline {
+		t.Fatalf("websites=%+v", websites)
+	}
+	if websites[0].Name != "eligible" || websites[0].Cluster != "edge-a" {
+		t.Fatalf("terminal control characters were not removed: %+v", websites[0])
 	}
 }
 
@@ -443,6 +483,17 @@ func serverFixture(t *testing.T, id int64, names []ServerName, policyID int64) s
 	namesJSON, _ := json.Marshal(names)
 	httpsJSON, _ := json.Marshal(httpsConfig{IsOn: true, SSLPolicyRef: &SSLPolicyRef{IsOn: true, SSLPolicyID: policyID}})
 	return serverResponse{ID: id, ServerNamesJSON: namesJSON, HTTPSJSON: httpsJSON}
+}
+
+func websiteFixture(t *testing.T, id int64, name string, names []ServerName, policyID, clusterID int64, clusterName string) serverResponse {
+	t.Helper()
+	server := serverFixture(t, id, names, policyID)
+	server.Name = name
+	server.NodeCluster = &struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}{ID: clusterID, Name: clusterName}
+	return server
 }
 
 func inputConfig(input CertificateInput) CertificateConfig {

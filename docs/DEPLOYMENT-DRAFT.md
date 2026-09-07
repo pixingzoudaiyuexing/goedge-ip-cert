@@ -7,9 +7,10 @@
 ```text
 用户:      goedge-ip-cert，无登录 shell
 二进制:    /usr/local/bin/goedge-ip-cert，root:root 0755
-配置:      /etc/goedge-ip-cert/config.yaml，root:goedge-ip-cert 0640
+管理器:    /usr/local/sbin/goedge-ip-cert-manager，root:root 0755
+配置:      /etc/goedge-ip-cert/targets.d/*.yaml，root:goedge-ip-cert 0640
 credentials: /etc/goedge-ip-cert/credentials，goedge-ip-cert:goedge-ip-cert 0600
-状态:      /var/lib/goedge-ip-cert，goedge-ip-cert:goedge-ip-cert 0700
+状态:      /var/lib/goedge-ip-cert/targets/<IPv4>，goedge-ip-cert:goedge-ip-cert 0700
 日志:      journald，只记录脱敏结构化事件
 ```
 
@@ -49,7 +50,7 @@ ConditionFileIsExecutable=/usr/local/bin/goedge-ip-cert
 Type=oneshot
 User=goedge-ip-cert
 Group=goedge-ip-cert
-ExecStart=/usr/local/bin/goedge-ip-cert run-once --config /etc/goedge-ip-cert/config.yaml --apply
+ExecStart=/usr/local/sbin/goedge-ip-cert-manager run-all
 NoNewPrivileges=yes
 PrivateTmp=yes
 PrivateDevices=yes
@@ -105,8 +106,8 @@ WantedBy=timers.target
 
 ## 备份、升级与回滚
 
-- 加密备份 `/var/lib/goedge-ip-cert/account`、`state.db` 及 credential文件；定期恢复演练。
-- `/var/lib/goedge-ip-cert/rollback` 是短期故障窗口，不进入普通定时备份；它只在停止 timer 且确认无进行中 renewal 后才能安全排除/清理。
+- 加密备份 `/var/lib/goedge-ip-cert/targets/*/account`、`state.db` 及 credential 文件；定期恢复演练。
+- `/var/lib/goedge-ip-cert/targets/*/rollback` 是短期故障窗口，不进入普通定时备份；它只在停止 timer 且确认无进行中 renewal 后才能安全排除/清理。
 - 升级前停止 timer，等待当前 oneshot 结束，备份状态，再原子替换二进制并运行 dry-run。
 - 应用失败时停止 timer，恢复上一二进制和 state/account 备份。
 - 如果已更新 GoEdge 证书但 TLS 验收失败，应通过 EdgeAPI 恢复升级前导出的 cert PEM/key 和元数据，不能直接 UPDATE DB。

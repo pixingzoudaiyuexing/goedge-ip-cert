@@ -75,6 +75,17 @@ type ServerTarget struct {
 	HTTPSIsOn bool
 }
 
+type Website struct {
+	ServerID   int64  `json:"serverId"`
+	UserID     int64  `json:"userId"`
+	Name       string `json:"name"`
+	IPv4       string `json:"ipv4"`
+	PolicyID   int64  `json:"policyId"`
+	ClusterID  int64  `json:"clusterId"`
+	Cluster    string `json:"cluster"`
+	NodeOnline bool   `json:"nodeOnline"`
+}
+
 type SSLCertRef struct {
 	IsOn   bool  `json:"isOn"`
 	CertID int64 `json:"certId"`

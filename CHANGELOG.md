@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.1.0-preview.2 - 2026-09-08
+
+Installer and multi-IP management preview.
+
+### Added
+
+- Chinese interactive `install.sh` and fixed seven-item manager menu
+- Debian 12 amd64/arm64 detection and SHA-256 verified GitHub Release installation
+- Automatic GoEdge v1.3.9 EdgeAPI/database discovery
+- Fail-closed creation and verification of the table-scoped MySQL runtime account
+- Read-only eligible website discovery with strict single-public-IPv4 filtering
+- Per-target config, SQLite state, ACME account and rollback directories
+- Serial multi-target timer runner protected by a global lock
+- Combined certificate, binding, Node, renewal and system-trust status view
+- SHA-verified transactional updates, sensitive backup/restore and safe uninstall
+
+### Safety
+
+- Initial installation never creates an ACME order or certificate.
+- First SSL Policy binding remains manual; the manager never mutates Policy JSON.
+- Existing installations, target state and GoEdge business objects are never overwritten automatically.
+- Core ACME issuance, HTTP-01, lifecycle and rollback engines are unchanged.
+
 ## v0.1.0-preview.1 - 2026-09-08
 
 First public preview.

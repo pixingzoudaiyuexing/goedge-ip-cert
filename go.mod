@@ -2,7 +2,7 @@ module github.com/pixingzoudaiyuexing/goedge-ip-cert
 
 go 1.22.0
 
-toolchain go1.22.12
+toolchain go1.26.6
 
 require (
 	github.com/go-acme/lego/v4 v4.22.2

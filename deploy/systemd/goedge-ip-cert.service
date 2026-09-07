@@ -3,12 +3,13 @@ Description=GoEdge IPv4 certificate renewal check
 Wants=network-online.target
 After=network-online.target
 ConditionFileIsExecutable=/usr/local/bin/goedge-ip-cert
+ConditionFileIsExecutable=/usr/local/sbin/goedge-ip-cert-manager
 
 [Service]
 Type=oneshot
 User=goedge-ip-cert
 Group=goedge-ip-cert
-ExecStart=/usr/local/bin/goedge-ip-cert run-once --config /etc/goedge-ip-cert/config.yaml --apply
+ExecStart=/usr/local/sbin/goedge-ip-cert-manager run-all
 NoNewPrivileges=yes
 PrivateTmp=yes
 PrivateDevices=yes
