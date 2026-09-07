@@ -1,0 +1,12 @@
+/bin/
+/dist/
+/coverage.out
+*.log
+*.db
+*.db-shm
+*.db-wal
+*.pem
+*.key
+*.secret
+.env
+/tmp/

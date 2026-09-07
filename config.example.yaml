@@ -1,0 +1,32 @@
+version: 1
+
+target:
+  ipv4: 203.0.113.10 # 示例地址，部署时替换为真实公网 IPv4
+
+goedge:
+  endpoint: http://127.0.0.1:8002
+  identity_type: admin
+  access_key_id:
+    file: /run/credentials/goedge-ip-cert.service/goedge-access-key-id
+  access_key:
+    file: /run/credentials/goedge-ip-cert.service/goedge-access-key
+  request_timeout: 15s
+
+database:
+  name: edges
+  dsn:
+    file: /run/credentials/goedge-ip-cert.service/mysql-dsn
+
+acme:
+  directory_url: https://acme-v02.api.letsencrypt.org/directory
+  email: ops@example.com
+  account_dir: /var/lib/goedge-ip-cert/account
+
+state:
+  path: /var/lib/goedge-ip-cert/state.db
+
+schedule:
+  renew_before: 72h
+  retry_min: 15m
+  retry_max: 6h
+  jitter_max: 10m
