@@ -17,8 +17,9 @@
 ## 私钥
 
 - ACME account key 持久保存为 0600，并通过临时文件、`fsync`、rename 原子更新 metadata。
-- 新证书私钥只在签发至 GoEdge 更新的 operation 中暂存；SQLite 文件为 0600，进入 ACTIVE 后清空 operation 中的 PEM/key。
+- 新证书私钥只在当前进程内存持有，SQLite schema 不含 certificate PEM/key 字段。
 - GoEdge 是 active certificate key 的长期存储。本服务不另建永久证书私钥仓库。
+- renewal 更新前的旧证书/私钥只存在于 `/var/lib/goedge-ip-cert/rollback/<operation-id>.json`：目录 0700、文件 0600、原子写入；成功或确认回滚后删除，不进入普通备份。
 - 私钥、keyAuthorization、Access Key/Token、DB DSN 不进入日志或错误报告。
 
 ## 数据库硬边界
@@ -34,6 +35,14 @@ WHERE id=? AND taskId=? AND domain=? AND token=? LIMIT 1;
 ```
 
 `taskId` 永远为 0。删除必须同时匹配插入 ID、taskId、domain 和 token。schema guard 未通过时所有写入拒绝执行；代码没有 migration、ALTER 或 CREATE 路径。
+
+## REST redirect
+
+GoEdge REST client 强制 `CheckRedirect = http.ErrUseLastResponse`。301、302、303、307、308 和其他 3xx 都由非 2xx 检查 fail closed；不会访问 `Location`，也不会把 Access Key body 或 `X-Edge-Access-Token` 发送到重定向目标。
+
+## Policy
+
+Cert Manager 没有任何 SSL Policy 写方法。它只调用 `findEnabledSSLPolicyConfig` 检查管理员已完成的 enabled cert ref；未绑定时返回 cert ID / policy ID 并停止。
 
 ## 日志脱敏
 

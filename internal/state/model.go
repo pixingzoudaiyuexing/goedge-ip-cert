@@ -50,8 +50,6 @@ type Operation struct {
 	PolicyID        int64
 	CertID          int64
 	UserID          int64
-	CertPEM         []byte
-	KeyPEM          []byte
 	CertFingerprint string
 	ExpiresAt       int64
 	ErrorCategory   string

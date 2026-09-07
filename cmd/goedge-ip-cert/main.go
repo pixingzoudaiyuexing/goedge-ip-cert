@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -19,9 +20,11 @@ import (
 	"github.com/pixingzoudaiyuexing/goedge-ip-cert/internal/goedge"
 	"github.com/pixingzoudaiyuexing/goedge-ip-cert/internal/lifecycle"
 	"github.com/pixingzoudaiyuexing/goedge-ip-cert/internal/lock"
+	"github.com/pixingzoudaiyuexing/goedge-ip-cert/internal/rollback"
 	"github.com/pixingzoudaiyuexing/goedge-ip-cert/internal/scheduler"
 	"github.com/pixingzoudaiyuexing/goedge-ip-cert/internal/security"
 	"github.com/pixingzoudaiyuexing/goedge-ip-cert/internal/state"
+	"github.com/pixingzoudaiyuexing/goedge-ip-cert/internal/tlsverify"
 )
 
 const defaultConfigPath = "/etc/goedge-ip-cert/config.yaml"
@@ -156,6 +159,12 @@ func runOnce(ctx context.Context, configPath string, apply bool) error {
 	}
 	runner.Issuer = issuer
 	runner.AccountReference = reference
+	rollbackStore, err := rollback.NewStore(filepath.Join(filepath.Dir(cfg.State.Path), "rollback"))
+	if err != nil {
+		return err
+	}
+	runner.Rollbacks = rollbackStore
+	runner.TLS = &tlsverify.NetworkVerifier{Timeout: 90 * time.Second, PollInterval: 2 * time.Second}
 	return runner.RunOnce(ctx, cfg.Target.IPv4)
 }
 

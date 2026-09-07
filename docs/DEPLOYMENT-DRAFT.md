@@ -89,6 +89,7 @@ WantedBy=timers.target
 ## 备份、升级与回滚
 
 - 加密备份 `/var/lib/goedge-ip-cert/account`、`state.db` 及 systemd credential 源文件；定期恢复演练。
+- `/var/lib/goedge-ip-cert/rollback` 是短期故障窗口，不进入普通定时备份；它只在停止 timer 且确认无进行中 renewal 后才能安全排除/清理。
 - 升级前停止 timer，等待当前 oneshot 结束，备份状态，再原子替换二进制并运行 dry-run。
 - 应用失败时停止 timer，恢复上一二进制和 state/account 备份。
 - 如果已更新 GoEdge 证书但 TLS 验收失败，应通过 EdgeAPI 恢复升级前导出的 cert PEM/key 和元数据，不能直接 UPDATE DB。

@@ -6,10 +6,12 @@
 - Let's Encrypt；
 - HTTP-01；
 - ACME `shortlived` Profile；
-- 通过 GoEdge v1.3.9 原版 REST API 创建证书、更新同一证书 ID、绑定 Policy；
+- 通过 GoEdge v1.3.9 原版 REST API 创建证书、更新同一证书 ID；SSL Policy 只读验证，必须由管理员在 EdgeAdmin 手工绑定；
 - 仅在 `edgeACMEAuthentications` 表创建和精确删除临时 challenge。
 
 它不修改 EdgeAPI、EdgeAdmin、EdgeNode 或 EdgeCommon，不创建 `edgeACMETasks`，不直接写证书、Policy、Server 或 NodeTask 表，也不监听或代理 80/443。
+
+首次签发会先创建 GoEdge Certificate 并返回错误提示中的 cert ID / policy ID。管理员在 EdgeAdmin 手工绑定一次后重新运行，服务只读确认绑定并进入 ACTIVE。后续续期永远更新同一个 cert ID，不再修改 Policy。
 
 ## 当前阶段
 

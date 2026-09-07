@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +17,95 @@ import (
 type staticCredentials struct{ value Credentials }
 
 func (s staticCredentials) Credentials() (Credentials, error) { return s.value, nil }
+
+func redirectSameHost(t *testing.T, status int) (string, *http.Client, *int, *string) {
+	t.Helper()
+	hits := 0
+	leaked := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/APIAccessTokenService/getAPIAccessToken" {
+			writeEnvelope(t, w, 200, "ok", map[string]any{"token": "redirect-secret-token", "expiresAt": time.Now().Add(time.Hour).Unix()})
+			return
+		}
+		if r.URL.Path == "/redirect-target" {
+			hits++
+			leaked = r.Header.Get("X-Edge-Access-Token")
+			writePolicyResponse(t, w)
+			return
+		}
+		http.Redirect(w, r, "/redirect-target", status)
+	}))
+	t.Cleanup(server.Close)
+	return server.URL, server.Client(), &hits, &leaked
+}
+
+func redirectCrossHost(t *testing.T, status int) (string, *http.Client, *int, *string) {
+	t.Helper()
+	hits := 0
+	leaked := ""
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		leaked = r.Header.Get("X-Edge-Access-Token")
+		writePolicyResponse(t, w)
+	}))
+	t.Cleanup(target.Close)
+	source := redirectSource(t, status, target.URL+"/redirect-target", false)
+	return source.URL, source.Client(), &hits, &leaked
+}
+
+func redirectHTTPToHTTPS(t *testing.T, status int) (string, *http.Client, *int, *string) {
+	t.Helper()
+	hits := 0
+	leaked := ""
+	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		leaked = r.Header.Get("X-Edge-Access-Token")
+		writePolicyResponse(t, w)
+	}))
+	t.Cleanup(target.Close)
+	source := redirectSource(t, status, target.URL+"/redirect-target", false)
+	return source.URL, target.Client(), &hits, &leaked
+}
+
+func redirectHTTPSToHTTP(t *testing.T, status int) (string, *http.Client, *int, *string) {
+	t.Helper()
+	hits := 0
+	leaked := ""
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		leaked = r.Header.Get("X-Edge-Access-Token")
+		writePolicyResponse(t, w)
+	}))
+	t.Cleanup(target.Close)
+	source := redirectSource(t, status, target.URL+"/redirect-target", true)
+	return source.URL, source.Client(), &hits, &leaked
+}
+
+func redirectSource(t *testing.T, status int, location string, tls bool) *httptest.Server {
+	t.Helper()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/APIAccessTokenService/getAPIAccessToken" {
+			writeEnvelope(t, w, 200, "ok", map[string]any{"token": "redirect-secret-token", "expiresAt": time.Now().Add(time.Hour).Unix()})
+			return
+		}
+		w.Header().Set("Location", location)
+		w.WriteHeader(status)
+	})
+	var server *httptest.Server
+	if tls {
+		server = httptest.NewTLSServer(handler)
+	} else {
+		server = httptest.NewServer(handler)
+	}
+	t.Cleanup(server.Close)
+	return server
+}
+
+func writePolicyResponse(t *testing.T, w http.ResponseWriter) {
+	t.Helper()
+	data, _ := json.Marshal(SSLPolicy{ID: 9, IsOn: true})
+	writeEnvelope(t, w, 200, "ok", map[string]any{"sslPolicyJSON": data})
+}
 
 type fakeAPI struct {
 	t                *testing.T
@@ -166,29 +256,8 @@ func (f *fakeAPI) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		data, _ := json.Marshal(f.policy)
 		writeEnvelope(f.t, w, 200, "ok", map[string]any{"sslPolicyJSON": data})
 	case "/SSLPolicyService/updateSSLPolicy":
-		var request struct {
-			SSLPolicyID       int64    `json:"sslPolicyId"`
-			HTTP2Enabled      bool     `json:"http2Enabled"`
-			HTTP3Enabled      bool     `json:"http3Enabled"`
-			MinVersion        string   `json:"minVersion"`
-			SSLCertsJSON      []byte   `json:"sslCertsJSON"`
-			HSTSJSON          []byte   `json:"hstsJSON"`
-			ClientAuthType    int32    `json:"clientAuthType"`
-			ClientCACertsJSON []byte   `json:"clientCACertsJSON"`
-			CipherSuites      []string `json:"cipherSuites"`
-			CipherSuitesIsOn  bool     `json:"cipherSuitesIsOn"`
-			OCSPIsOn          bool     `json:"ocspIsOn"`
-		}
-		decodeBody(f.t, r, &request)
-		var refs, caRefs []SSLCertRef
-		_ = json.Unmarshal(request.SSLCertsJSON, &refs)
-		_ = json.Unmarshal(request.ClientCACertsJSON, &caRefs)
-		f.policy = SSLPolicy{ID: request.SSLPolicyID, IsOn: true, CertRefs: refs, ClientAuthType: request.ClientAuthType,
-			ClientCARefs: caRefs, MinVersion: request.MinVersion, CipherSuitesIsOn: request.CipherSuitesIsOn,
-			CipherSuites: request.CipherSuites, HSTS: request.HSTSJSON, HTTP2Enabled: request.HTTP2Enabled,
-			HTTP3Enabled: request.HTTP3Enabled, OCSPIsOn: request.OCSPIsOn}
 		f.policyWrites++
-		writeEnvelope(f.t, w, 200, "ok", map[string]any{})
+		writeEnvelope(f.t, w, 500, "Policy writes are forbidden", map[string]any{})
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
@@ -237,26 +306,89 @@ func TestDiscoverServerFiltersBroadSearchAndFailsClosed(t *testing.T) {
 	}
 }
 
-func TestBindCertificatePreservesPolicyAndDetectsRace(t *testing.T) {
+func TestVerifyCertificateBoundIsReadOnly(t *testing.T) {
 	f := newFakeAPI(t)
-	original := f.policy
-	already, err := f.client(time.Second).BindCertificate(context.Background(), 9, 11)
-	if err != nil || already || f.policyWrites != 1 || !f.policy.ContainsCert(11) {
-		t.Fatalf("already=%v err=%v writes=%d policy=%+v", already, err, f.policyWrites, f.policy)
+	f.policy.CertRefs = append(f.policy.CertRefs, SSLCertRef{IsOn: true, CertID: 11})
+	if err := f.client(time.Second).VerifyCertificateBound(context.Background(), 9, 11); err != nil {
+		t.Fatal(err)
 	}
-	if f.policy.MinVersion != original.MinVersion || !reflect.DeepEqual(f.policy.ClientCARefs, original.ClientCARefs) || !reflect.DeepEqual(f.policy.HSTS, original.HSTS) {
-		t.Fatal("policy fields were overwritten")
+	if f.policyWrites != 0 {
+		t.Fatalf("verification wrote Policy %d time(s)", f.policyWrites)
 	}
-	f2 := newFakeAPI(t)
-	f2.mutateOnRead = 2
-	_, err = f2.client(time.Second).BindCertificate(context.Background(), 9, 11)
-	if !errors.Is(err, ErrPolicyDrift) || f2.policyWrites != 0 {
-		t.Fatalf("race err=%v writes=%d", err, f2.policyWrites)
+
+	fMissing := newFakeAPI(t)
+	err := fMissing.client(time.Second).VerifyCertificateBound(context.Background(), 9, 11)
+	if !errors.Is(err, ErrCertificateNotBound) || !strings.Contains(err.Error(), "certificate ID 11") || !strings.Contains(err.Error(), "policy ID 9") {
+		t.Fatalf("missing binding err=%v", err)
 	}
-	f3 := newFakeAPI(t)
-	f3.policy.CertRefs = append(f3.policy.CertRefs, SSLCertRef{IsOn: false, CertID: 11})
-	if _, err := f3.client(time.Second).BindCertificate(context.Background(), 9, 11); err == nil || f3.policyWrites != 0 {
-		t.Fatalf("disabled target ref was overwritten: err=%v writes=%d", err, f3.policyWrites)
+	if fMissing.policyWrites != 0 {
+		t.Fatalf("missing binding wrote Policy %d time(s)", fMissing.policyWrites)
+	}
+
+	fConcurrent := newFakeAPI(t)
+	fConcurrent.mutateOnRead = 1
+	err = fConcurrent.client(time.Second).VerifyCertificateBound(context.Background(), 9, 11)
+	if !errors.Is(err, ErrCertificateNotBound) {
+		t.Fatalf("concurrent mutation err=%v", err)
+	}
+	if fConcurrent.policyWrites != 0 {
+		t.Fatalf("concurrent admin mutation caused %d Policy write(s)", fConcurrent.policyWrites)
+	}
+}
+
+func TestRESTClientRejectsRedirectsWithoutLeakingToken(t *testing.T) {
+	statuses := []int{http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect}
+	tests := []struct {
+		name    string
+		servers func(*testing.T, int) (string, *http.Client, *int, *string)
+	}{
+		{"same-host", redirectSameHost},
+		{"cross-host", redirectCrossHost},
+		{"http-to-https", redirectHTTPToHTTPS},
+		{"https-to-http", redirectHTTPSToHTTP},
+	}
+	for _, test := range tests {
+		for _, status := range statuses {
+			t.Run(fmt.Sprintf("%s/%d", test.name, status), func(t *testing.T) {
+				endpoint, httpClient, hits, leaked := test.servers(t, status)
+				client, err := NewClient(endpoint, httpClient, staticCredentials{Credentials{IdentityType: "admin", AccessKeyID: "test-id", AccessKey: "test-secret"}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := client.Policy(context.Background(), 9); err == nil {
+					t.Fatal("redirect unexpectedly accepted")
+				}
+				if *hits != 0 || *leaked != "" {
+					t.Fatalf("redirect target hits=%d leaked token=%q", *hits, *leaked)
+				}
+			})
+		}
+	}
+}
+
+func TestRESTClientRejectsAuthenticationRedirectWithoutLeakingAccessKey(t *testing.T) {
+	var hits int
+	var leakedBody string
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		hits++
+		data, _ := io.ReadAll(r.Body)
+		leakedBody = string(data)
+	}))
+	t.Cleanup(target.Close)
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", target.URL)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(source.Close)
+	client, err := NewClient(source.URL, source.Client(), staticCredentials{Credentials{IdentityType: "admin", AccessKeyID: "test-id", AccessKey: "test-secret"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Policy(context.Background(), 9); err == nil {
+		t.Fatal("authentication redirect unexpectedly accepted")
+	}
+	if hits != 0 || leakedBody != "" {
+		t.Fatalf("redirect target hits=%d leaked body=%q", hits, leakedBody)
 	}
 }
 

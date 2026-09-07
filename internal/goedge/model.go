@@ -10,7 +10,7 @@ var (
 	ErrUnexpectedResponse   = errors.New("GoEdge unexpected response")
 	ErrServerNotFound       = errors.New("GoEdge server not found")
 	ErrMultipleServers      = errors.New("multiple GoEdge servers match IPv4")
-	ErrPolicyDrift          = errors.New("GoEdge SSL policy changed concurrently")
+	ErrCertificateNotBound  = errors.New("GoEdge certificate is not bound to SSL policy")
 	ErrCertificateNotFound  = errors.New("GoEdge certificate not found")
 	ErrMultipleCertificates = errors.New("multiple GoEdge certificates match marker")
 )
@@ -93,13 +93,4 @@ type SSLPolicy struct {
 	HTTP2Enabled     bool            `json:"http2Enabled"`
 	HTTP3Enabled     bool            `json:"http3Enabled"`
 	OCSPIsOn         bool            `json:"ocspIsOn"`
-}
-
-func (p SSLPolicy) ContainsCert(certID int64) bool {
-	for _, ref := range p.CertRefs {
-		if ref.CertID == certID && ref.IsOn {
-			return true
-		}
-	}
-	return false
 }

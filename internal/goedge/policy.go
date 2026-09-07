@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 )
 
 func (c *Client) Policy(ctx context.Context, policyID int64) (SSLPolicy, error) {
@@ -22,61 +21,22 @@ func (c *Client) Policy(ctx context.Context, policyID int64) (SSLPolicy, error) 
 	return normalizePolicy(policy), nil
 }
 
-func (c *Client) BindCertificate(ctx context.Context, policyID, certID int64) (bool, error) {
-	base, err := c.Policy(ctx, policyID)
+// VerifyCertificateBound 只读确认管理员已经在 EdgeAdmin 完成证书绑定。
+func (c *Client) VerifyCertificateBound(ctx context.Context, policyID, certID int64) error {
+	policy, err := c.Policy(ctx, policyID)
 	if err != nil {
-		return false, err
+		return err
 	}
-	if !base.IsOn {
-		return false, errorsNew("SSL Policy 未启用")
+	if !policy.IsOn {
+		return errorsNew("SSL Policy 未启用")
 	}
-	matches := 0
-	enabled := false
-	for _, ref := range base.CertRefs {
-		if ref.CertID == certID {
-			matches++
-			enabled = enabled || ref.IsOn
+	for _, ref := range policy.CertRefs {
+		if ref.CertID == certID && ref.IsOn {
+			return nil
 		}
 	}
-	if matches == 1 && enabled {
-		return true, nil
-	}
-	if matches > 0 {
-		return false, errorsNew("SSL Policy 已存在禁用或重复的目标证书引用，拒绝自动覆盖")
-	}
-	expected := base
-	expected.CertRefs = append(append([]SSLCertRef(nil), base.CertRefs...), SSLCertRef{IsOn: true, CertID: certID})
-
-	current, err := c.Policy(ctx, policyID)
-	if err != nil {
-		return false, err
-	}
-	if !reflect.DeepEqual(base, current) {
-		return false, ErrPolicyDrift
-	}
-	certsJSON, _ := json.Marshal(expected.CertRefs)
-	clientCAsJSON, _ := json.Marshal(expected.ClientCARefs)
-	hstsJSON := []byte(nil)
-	if len(expected.HSTS) > 0 && string(expected.HSTS) != "null" {
-		hstsJSON = expected.HSTS
-	}
-	request := map[string]any{
-		"sslPolicyId": policyID, "http2Enabled": expected.HTTP2Enabled, "http3Enabled": expected.HTTP3Enabled,
-		"minVersion": expected.MinVersion, "sslCertsJSON": certsJSON, "hstsJSON": hstsJSON,
-		"clientAuthType": expected.ClientAuthType, "clientCACertsJSON": clientCAsJSON,
-		"cipherSuites": expected.CipherSuites, "cipherSuitesIsOn": expected.CipherSuitesIsOn, "ocspIsOn": expected.OCSPIsOn,
-	}
-	if err := c.call(ctx, "/SSLPolicyService/updateSSLPolicy", request, &struct{}{}); err != nil {
-		return false, err
-	}
-	readBack, err := c.Policy(ctx, policyID)
-	if err != nil {
-		return false, err
-	}
-	if !reflect.DeepEqual(normalizePolicy(expected), readBack) {
-		return false, ErrPolicyDrift
-	}
-	return false, nil
+	return fmt.Errorf("%w: certificate ID %d, policy ID %d; 请在 EdgeAdmin 手工绑定后重试",
+		ErrCertificateNotBound, certID, policyID)
 }
 
 func normalizePolicy(policy SSLPolicy) SSLPolicy {

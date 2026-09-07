@@ -15,7 +15,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 1
+const (
+	schemaVersion           = 2
+	schemaVersionNeedsScrub = -2
+)
 
 type Store struct {
 	db *sql.DB
@@ -95,8 +98,6 @@ func (s *Store) init(ctx context.Context) error {
 			policy_id INTEGER NOT NULL DEFAULT 0,
 			cert_id INTEGER NOT NULL DEFAULT 0,
 			user_id INTEGER NOT NULL DEFAULT 0,
-			cert_pem BLOB,
-			key_pem BLOB,
 			cert_fingerprint TEXT NOT NULL DEFAULT '',
 			expires_at INTEGER NOT NULL DEFAULT 0,
 			error_category TEXT NOT NULL DEFAULT '',
@@ -134,10 +135,57 @@ func (s *Store) init(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("读取 state schema 版本: %w", err)
 	}
+	if version == 1 {
+		if err := s.dropLegacyPEMColumns(ctx); err != nil {
+			return err
+		}
+		version = schemaVersionNeedsScrub
+	}
+	if version == schemaVersionNeedsScrub {
+		if err := s.scrubLegacyPrivateKeyPages(ctx); err != nil {
+			return err
+		}
+		version = schemaVersion
+	}
 	if version != schemaVersion {
 		return fmt.Errorf("不支持的 state schema 版本 %d", version)
 	}
 	return nil
+}
+
+func (s *Store) dropLegacyPEMColumns(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `PRAGMA secure_delete=ON`); err != nil {
+		return fmt.Errorf("启用 SQLite secure_delete: %w", err)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, statement := range []string{
+		`ALTER TABLE operations DROP COLUMN cert_pem`,
+		`ALTER TABLE operations DROP COLUMN key_pem`,
+		`UPDATE schema_meta SET version=-2`,
+	} {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("迁移 state schema v1: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) scrubLegacyPrivateKeyPages(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		return fmt.Errorf("截断 SQLite WAL: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `VACUUM`); err != nil {
+		return fmt.Errorf("清理 SQLite legacy private key pages: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE schema_meta SET version=?`, schemaVersion); err != nil {
+		return fmt.Errorf("完成 state schema migration: %w", err)
+	}
+	_, err := s.db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`)
+	return err
 }
 
 func NewOperationID() (string, error) {
@@ -173,9 +221,9 @@ func (s *Store) Operation(ctx context.Context, id string) (Operation, error) {
 	var op Operation
 	var stage string
 	err := s.db.QueryRowContext(ctx, `SELECT id, ipv4, kind, stage, marker, server_id, policy_id, cert_id, user_id,
-		cert_pem, key_pem, cert_fingerprint, expires_at, error_category, error_message, recovery_marker,
+		cert_fingerprint, expires_at, error_category, error_message, recovery_marker,
 		retry_count, next_retry_at, created_at, updated_at FROM operations WHERE id=?`, id).Scan(&op.ID, &op.IPv4, &op.Kind, &stage,
-		&op.Marker, &op.ServerID, &op.PolicyID, &op.CertID, &op.UserID, &op.CertPEM, &op.KeyPEM, &op.CertFingerprint,
+		&op.Marker, &op.ServerID, &op.PolicyID, &op.CertID, &op.UserID, &op.CertFingerprint,
 		&op.ExpiresAt, &op.ErrorCategory, &op.ErrorMessage, &op.RecoveryMarker, &op.RetryCount, &op.NextRetryAt,
 		&op.CreatedAt, &op.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -220,12 +268,12 @@ func (s *Store) Transition(ctx context.Context, id string, expected, next Lifecy
 	return s.updateExpected(ctx, id, expected, next, `recovery_marker=?`, recoveryMarker)
 }
 
-func (s *Store) SaveIssued(ctx context.Context, id string, expected LifecycleState, certPEM, keyPEM []byte, fingerprint string, expiresAt int64) error {
-	if len(certPEM) == 0 || len(keyPEM) == 0 || fingerprint == "" || expiresAt <= 0 {
+func (s *Store) SaveIssued(ctx context.Context, id string, expected LifecycleState, fingerprint string, expiresAt int64) error {
+	if fingerprint == "" || expiresAt <= 0 {
 		return errors.New("已签发证书状态不完整")
 	}
 	return s.updateExpected(ctx, id, expected, StateCertIssued,
-		`cert_pem=?, key_pem=?, cert_fingerprint=?, expires_at=?, recovery_marker=''`, certPEM, keyPEM, fingerprint, expiresAt)
+		`cert_fingerprint=?, expires_at=?, recovery_marker=''`, fingerprint, expiresAt)
 }
 
 func (s *Store) SetCertCreated(ctx context.Context, id string, expected LifecycleState, certID int64) error {
@@ -303,7 +351,7 @@ func (s *Store) SetActive(ctx context.Context, id string, expected LifecycleStat
 	if err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE operations SET stage=?, cert_pem=NULL, key_pem=NULL,
+	result, err := tx.ExecContext(ctx, `UPDATE operations SET stage=?,
 		error_category='', error_message='', recovery_marker='', updated_at=? WHERE id=? AND stage=?`,
 		StateActive, time.Now().UnixNano(), id, expected)
 	if err != nil {

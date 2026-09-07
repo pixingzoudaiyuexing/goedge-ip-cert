@@ -36,7 +36,11 @@ func NewClient(endpoint string, httpClient *http.Client, credentials CredentialP
 	if httpClient == nil || credentials == nil {
 		return nil, errors.New("GoEdge HTTP client/credentials 不能为空")
 	}
-	return &Client{baseURL: baseURL, httpClient: httpClient, credentials: credentials}, nil
+	client := *httpClient
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return &Client{baseURL: baseURL, httpClient: &client, credentials: credentials}, nil
 }
 
 type apiCode int
