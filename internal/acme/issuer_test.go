@@ -3,8 +3,10 @@ package acme
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,6 +15,36 @@ import (
 	"github.com/go-acme/lego/v4/certificate"
 	legoclient "github.com/go-acme/lego/v4/lego"
 )
+
+func TestIPv4CSRUsesOnlyIPSAN(t *testing.T) {
+	const target = "64.118.151.220"
+	request, err := obtainRequest(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.CSR == nil || request.PrivateKey == nil {
+		t.Fatal("obtain request is missing CSR or private key")
+	}
+	csr, err := x509.ParseCertificateRequest(request.CSR.Raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := csr.CheckSignature(); err != nil {
+		t.Fatalf("CSR signature: %v", err)
+	}
+	if csr.Subject.CommonName != "" {
+		t.Fatalf("CSR CommonName=%q, want empty", csr.Subject.CommonName)
+	}
+	if len(csr.DNSNames) != 0 {
+		t.Fatalf("CSR DNSNames=%v, want empty", csr.DNSNames)
+	}
+	if len(csr.IPAddresses) != 1 || !csr.IPAddresses[0].Equal(net.ParseIP(target)) {
+		t.Fatalf("CSR IPAddresses=%v, want [%s]", csr.IPAddresses, target)
+	}
+	if len(csr.EmailAddresses) != 0 || len(csr.URIs) != 0 {
+		t.Fatalf("CSR contains unexpected identities: emails=%v uris=%v", csr.EmailAddresses, csr.URIs)
+	}
+}
 
 func TestIPv4NewOrderContainsIPIdentifierAndShortLivedProfile(t *testing.T) {
 	request, err := obtainRequest("8.8.8.8")
@@ -40,7 +72,7 @@ func TestObtainRequestRejectsNonPublicIPv4(t *testing.T) {
 	}
 }
 
-func captureNewOrder(t *testing.T, request certificate.ObtainRequest) legoacme.Order {
+func captureNewOrder(t *testing.T, request certificate.ObtainForCSRRequest) legoacme.Order {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	if err != nil {
@@ -79,7 +111,7 @@ func captureNewOrder(t *testing.T, request certificate.ObtainRequest) legoacme.O
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.Certificate.Obtain(request); err == nil {
+	if _, err := client.Certificate.ObtainForCSR(request); err == nil {
 		t.Fatal("fixture should stop after new-order")
 	}
 	return captured

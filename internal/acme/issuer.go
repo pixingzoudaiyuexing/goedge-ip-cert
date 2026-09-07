@@ -2,10 +2,14 @@ package acme
 
 import (
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 
 	"github.com/go-acme/lego/v4/certcrypto"
 	"github.com/go-acme/lego/v4/certificate"
@@ -77,7 +81,7 @@ func (i *Issuer) Obtain(ctx context.Context, operationID, requestedIPv4 string) 
 	if err != nil {
 		return IssuedCertificate{}, err
 	}
-	resource, err := client.Certificate.Obtain(request)
+	resource, err := client.Certificate.ObtainForCSR(request)
 	if err != nil {
 		return IssuedCertificate{}, fmt.Errorf("ACME obtain: %w", err)
 	}
@@ -87,9 +91,39 @@ func (i *Issuer) Obtain(ctx context.Context, operationID, requestedIPv4 string) 
 	return IssuedCertificate{Certificate: resource.Certificate, PrivateKey: resource.PrivateKey}, nil
 }
 
-func obtainRequest(requestedIPv4 string) (certificate.ObtainRequest, error) {
+func obtainRequest(requestedIPv4 string) (certificate.ObtainForCSRRequest, error) {
 	if _, err := ipv4.ParsePublic(requestedIPv4); err != nil {
-		return certificate.ObtainRequest{}, err
+		return certificate.ObtainForCSRRequest{}, err
 	}
-	return certificate.ObtainRequest{Domains: []string{requestedIPv4}, Bundle: true, Profile: ShortLivedProfile}, nil
+	privateKey, err := certcrypto.GeneratePrivateKey(certcrypto.RSA2048)
+	if err != nil {
+		return certificate.ObtainForCSRRequest{}, fmt.Errorf("生成 certificate private key: %w", err)
+	}
+	der, err := createIPv4CSRDER(requestedIPv4, privateKey)
+	if err != nil {
+		return certificate.ObtainForCSRRequest{}, err
+	}
+	csr, err := x509.ParseCertificateRequest(der)
+	if err != nil {
+		return certificate.ObtainForCSRRequest{}, fmt.Errorf("解析 IPv4 CSR: %w", err)
+	}
+	if err := csr.CheckSignature(); err != nil {
+		return certificate.ObtainForCSRRequest{}, fmt.Errorf("校验 IPv4 CSR 签名: %w", err)
+	}
+	return certificate.ObtainForCSRRequest{
+		CSR: csr, PrivateKey: privateKey, Bundle: true, Profile: ShortLivedProfile,
+	}, nil
+}
+
+func createIPv4CSRDER(requestedIPv4 string, privateKey crypto.PrivateKey) ([]byte, error) {
+	addr, err := ipv4.ParsePublic(requestedIPv4)
+	if err != nil {
+		return nil, err
+	}
+	if privateKey == nil {
+		return nil, errors.New("certificate private key 不能为空")
+	}
+	return x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+		IPAddresses: []net.IP{net.IP(addr.AsSlice())},
+	}, privateKey)
 }
