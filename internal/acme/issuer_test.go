@@ -17,7 +17,7 @@ import (
 )
 
 func TestIPv4CSRUsesOnlyIPSAN(t *testing.T) {
-	const target = "64.118.151.220"
+	const target = "8.8.8.8"
 	request, err := obtainRequest(target)
 	if err != nil {
 		t.Fatal(err)

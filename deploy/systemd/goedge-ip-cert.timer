@@ -1,0 +1,12 @@
+[Unit]
+Description=Hourly GoEdge IPv4 certificate renewal check
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=5m
+AccuracySec=1m
+Unit=goedge-ip-cert.service
+
+[Install]
+WantedBy=timers.target

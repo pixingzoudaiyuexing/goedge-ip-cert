@@ -5,11 +5,19 @@ cd "$(dirname "$0")/.."
 
 files=$(git ls-files --cached --others --exclude-standard | grep -v '^scripts/secret-scan.sh$')
 test -n "$files"
+non_test_files=$(printf '%s\n' "$files" | grep -Ev '(^|/).*_test\.go$')
+test -n "$non_test_files"
 
 if printf '%s\n' "$files" | xargs grep -nE -- \
-  '-----BEGIN (OPENSSH|RSA|EC|DSA) PRIVATE KEY-----|AKIA[0-9A-Z]{16}|github_pat_[A-Za-z0-9_]{20,}|ghp_[A-Za-z0-9]{30,}|sk-(proj-)?[A-Za-z0-9_-]{24,}|mysql://[^[:space:]]+:[^[:space:]@]+@'; then
-  echo 'secret-scan: possible credential material found' >&2
-  exit 1
+  'AKIA[0-9A-Z]{16}|github_pat_[A-Za-z0-9_]{20,}|ghp_[A-Za-z0-9]{30,}|sk-(proj-)?[A-Za-z0-9_-]{24,}|mysql://[^[:space:]]+:[^[:space:]@]+@|[A-Za-z0-9_.-]+:[A-Za-z0-9+/_.-]{8,}@tcp\(|X-Edge-Access-Token:[[:space:]]*[A-Za-z0-9+/_.-]{12,}'; then
+	echo 'secret-scan: possible credential material found' >&2
+	exit 1
+fi
+
+if printf '%s\n' "$non_test_files" | xargs grep -nE -- \
+  '-----BEGIN ([A-Z0-9 ]*PRIVATE KEY|CERTIFICATE|CERTIFICATE REQUEST)-----'; then
+	echo 'secret-scan: unexpected PEM material found' >&2
+	exit 1
 fi
 
 if printf '%s\n' "$files" | grep -Ev '(^|/)(go.sum|.*_test.go)$|^docs/SECURITY.md$' | \

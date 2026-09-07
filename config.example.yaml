@@ -7,15 +7,15 @@ goedge:
   endpoint: http://127.0.0.1:8002
   identity_type: admin
   access_key_id:
-    file: /run/credentials/goedge-ip-cert.service/goedge-access-key-id
+    file: /etc/goedge-ip-cert/credentials/goedge-access-key-id
   access_key:
-    file: /run/credentials/goedge-ip-cert.service/goedge-access-key
+    file: /etc/goedge-ip-cert/credentials/goedge-access-key
   request_timeout: 15s
 
 database:
   name: edges
   dsn:
-    file: /run/credentials/goedge-ip-cert.service/mysql-dsn
+    file: /etc/goedge-ip-cert/credentials/mysql-dsn
 
 acme:
   directory_url: https://acme-v02.api.letsencrypt.org/directory

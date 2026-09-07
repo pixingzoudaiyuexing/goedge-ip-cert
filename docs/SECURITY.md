@@ -4,7 +4,7 @@
 
 - GoEdge 使用专用 admin/user Access Key，不复用日常管理员身份。
 - 配置只保存 secret 引用；secret 来自 0600 文件、systemd `LoadCredential=` 或环境变量。
-- 环境变量便于测试，但生产优先 systemd credential file。
+- 环境变量便于测试；默认 Preview部署使用 service-owned 0600文件，也可在同步调整 config路径后使用 systemd `LoadCredential=`。
 - EdgeAPI v1.3.9 没有方法级 scope。若对象属于 admin，专用身份仍具有较大权限，这是已知风险。
 - Access Token 只在内存缓存，过期前刷新；认证失败最多刷新一次。
 

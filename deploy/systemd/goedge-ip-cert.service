@@ -1,0 +1,37 @@
+[Unit]
+Description=GoEdge IPv4 certificate renewal check
+Wants=network-online.target
+After=network-online.target
+ConditionFileIsExecutable=/usr/local/bin/goedge-ip-cert
+
+[Service]
+Type=oneshot
+User=goedge-ip-cert
+Group=goedge-ip-cert
+ExecStart=/usr/local/bin/goedge-ip-cert run-once --config /etc/goedge-ip-cert/config.yaml --apply
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectHostname=yes
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+ReadOnlyPaths=/etc/goedge-ip-cert
+ReadWritePaths=/var/lib/goedge-ip-cert
+UMask=0077
+TimeoutStartSec=10min
+StandardOutput=journal
+StandardError=journal
