@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.0-preview.4 - 2026-09-08
+
+Manager dry-run contract fix.
+
+### Fixed
+
+- Read the existing core dry-run JSON contract using `IPv4`, `ServerID`, and `PolicyID` field names.
+- Run the unmanaged-target regression through the direct manager call path so Bash command substitution cannot mask `errexit` failures.
+
+### Safety
+
+- The regression covers discovery, pending target config creation, successful dry-run and explicit cancellation with no apply call.
+- No core ACME, HTTP-01, lifecycle, Policy or rollback behavior changed.
+
 ## v0.1.0-preview.3 - 2026-09-08
 
 Manager runtime fix.

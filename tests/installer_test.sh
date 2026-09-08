@@ -106,7 +106,7 @@ test_existing_target_is_not_overwritten() {
 }
 
 test_cancelled_dry_run_is_not_registered() {
-	local tmp output calls
+	local tmp output output_file calls
 	tmp=$(mktemp -d)
 	ROOT_PREFIX="$tmp"
 	unset GOEDGE_ENDPOINT DATABASE_NAME || true
@@ -114,7 +114,7 @@ test_cancelled_dry_run_is_not_registered() {
 	printf 'fixture\n' >"$tmp/etc/goedge-ip-cert/credentials/goedge-access-key-id"
 	printf 'fixture\n' >"$tmp/etc/goedge-ip-cert/credentials/goedge-access-key"
 	printf 'fixture\n' >"$tmp/etc/goedge-ip-cert/credentials/mysql-dsn"
-	printf 'v0.1.0-preview.3\n' >"$tmp/etc/goedge-ip-cert/installed-version"
+	printf 'v0.1.0-preview.4\n' >"$tmp/etc/goedge-ip-cert/installed-version"
 	printf 'DATABASE_NAME=edges\n' >"$tmp/etc/goedge-ip-cert/manager.conf"
 	calls="$tmp/calls"
 	flock() { return 0; }
@@ -134,7 +134,7 @@ test_cancelled_dry_run_is_not_registered() {
 				grep -F 'endpoint: http://127.0.0.1:8002' "$config_path" >/dev/null || fail "target endpoint missing"
 				grep -F 'name: edges' "$config_path" >/dev/null || fail "target database missing"
 				printf 'DRY_RUN_CONFIG_OK\n' >>"$calls"
-				printf '%s\n' '{"ipv4":"8.8.8.8","serverId":11,"policyId":12}'
+				printf '%s\n' '{"IPv4":"8.8.8.8","ServerID":11,"PolicyID":12}'
 				;;
 			*)
 				printf 'UNEXPECTED_CORE_CALL=%s\n' "$1" >>"$calls"
@@ -142,7 +142,9 @@ test_cancelled_dry_run_is_not_registered() {
 				;;
 		esac
 	}
-	output=$(GOEDGE_IP_CERT_TEST_MODE=1 apply_new_website <<< $'1\nn')
+	output_file="$tmp/output"
+	GOEDGE_IP_CERT_TEST_MODE=1 apply_new_website <<< $'1\nn' >"$output_file"
+	output=$(<"$output_file")
 	assert_contains "$output" "未创建 ACME order"
 	[ "$(grep -c '^DISCOVER$' "$calls")" -eq 1 ] || fail "website discovery did not use installed manager path"
 	[ "$(grep -c '^DRY_RUN_CONFIG_OK$' "$calls")" -eq 1 ] || fail "target config/dry-run was not completed"

@@ -29,7 +29,7 @@ import (
 )
 
 const defaultConfigPath = "/etc/goedge-ip-cert/config.yaml"
-const version = "v0.1.0-preview.3"
+const version = "v0.1.0-preview.4"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly RELEASE_TAG="v0.1.0-preview.3"
+readonly RELEASE_TAG="v0.1.0-preview.4"
 readonly REPOSITORY="pixingzoudaiyuexing/goedge-ip-cert"
 readonly SERVICE_USER="${GOEDGE_IP_CERT_SERVICE_USER:-goedge-ip-cert}"
 readonly SERVICE_GROUP="${GOEDGE_IP_CERT_SERVICE_GROUP:-goedge-ip-cert}"
@@ -431,9 +431,9 @@ apply_new_website() {
 	write_target_config "$ipv4" "$config"
 	dry=$(mktemp)
 	core run-once --config "$config" >"$dry"
-	[ "$(jq -r '.ipv4' "$dry")" = "$ipv4" ] || die "dry-run 目标不一致"
-	[ "$(jq -r '.serverId' "$dry")" = "$(jq -r '.serverId' <<<"$row")" ] || die "dry-run Server 不一致"
-	[ "$(jq -r '.policyId' "$dry")" = "$(jq -r '.policyId' <<<"$row")" ] || die "dry-run Policy 不一致"
+	[ "$(jq -r '.IPv4' "$dry")" = "$ipv4" ] || die "dry-run 目标不一致"
+	[ "$(jq -r '.ServerID' "$dry")" = "$(jq -r '.serverId' <<<"$row")" ] || die "dry-run Server 不一致"
+	[ "$(jq -r '.PolicyID' "$dry")" = "$(jq -r '.policyId' <<<"$row")" ] || die "dry-run Policy 不一致"
 	printf '\n网站: %s\nIPv4: %s\n集群: %s\nDry-run: PASS\n确认向 Let\047s Encrypt Production 申请 shortlived 证书？[y/N] ' "$name" "$ipv4" "$cluster"
 	IFS= read -r answer
 	[ "$answer" = "y" ] || [ "$answer" = "Y" ] || { [ "$is_new" -eq 0 ] || rm -f "$config"; rm -f "$dry"; release_global_lock; say "已取消，未创建 ACME order。"; return 0; }
