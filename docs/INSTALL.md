@@ -1,6 +1,6 @@
 # 安装与管理指南（Preview）
 
-> `v0.1.0-preview.2` 已完成隔离测试环境中的真实 Production CA、系统信任 TLS、同 Cert ID 续期和 Cluster 隔离验证。Stage 3T-4 多日无人值守自然续期验收仍在进行，请先在独立 Node / Cluster 使用。
+> `v0.1.0-preview.3` 修复 Manager 未管理网站 dry-run 路径。隔离测试环境中的真实 Production CA、系统信任 TLS、同 Cert ID 续期和 Cluster 隔离已经验证；Stage 3T-4 多日无人值守自然续期验收仍在进行，请先在独立 Node / Cluster 使用。
 
 ## 前置条件
 

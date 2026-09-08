@@ -8,7 +8,6 @@ export GOEDGE_IP_CERT_SERVICE_USER="$(id -un)"
 export GOEDGE_IP_CERT_SERVICE_GROUP="$(id -gn)"
 # shellcheck source=../install.sh
 source "$REPO_ROOT/install.sh"
-DATABASE_NAME=edges
 
 passed=0
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
@@ -91,6 +90,7 @@ test_existing_target_is_not_overwritten() {
 	tmp=$(mktemp -d)
 	ROOT_PREFIX="$tmp"
 	GOEDGE_ENDPOINT="$DEFAULT_ENDPOINT"
+	DATABASE_NAME=edges
 	mkdir -p "$tmp/etc/goedge-ip-cert/targets.d" "$tmp/var/lib/goedge-ip-cert/targets"
 	GOEDGE_IP_CERT_TEST_MODE=1 write_target_config "8.8.8.8"
 	target=$(target_config_path "8.8.8.8")
@@ -106,20 +106,47 @@ test_existing_target_is_not_overwritten() {
 }
 
 test_cancelled_dry_run_is_not_registered() {
-	local tmp output
+	local tmp output calls
 	tmp=$(mktemp -d)
 	ROOT_PREFIX="$tmp"
-	DATABASE_NAME=edges
-	mkdir -p "$tmp/etc/goedge-ip-cert/targets.d" "$tmp/var/lib/goedge-ip-cert/targets"
+	unset GOEDGE_ENDPOINT DATABASE_NAME || true
+	mkdir -p "$tmp/etc/goedge-ip-cert/credentials" "$tmp/etc/goedge-ip-cert/targets.d" "$tmp/var/lib/goedge-ip-cert/targets"
+	printf 'fixture\n' >"$tmp/etc/goedge-ip-cert/credentials/goedge-access-key-id"
+	printf 'fixture\n' >"$tmp/etc/goedge-ip-cert/credentials/goedge-access-key"
+	printf 'fixture\n' >"$tmp/etc/goedge-ip-cert/credentials/mysql-dsn"
+	printf 'v0.1.0-preview.3\n' >"$tmp/etc/goedge-ip-cert/installed-version"
+	printf 'DATABASE_NAME=edges\n' >"$tmp/etc/goedge-ip-cert/manager.conf"
+	calls="$tmp/calls"
 	flock() { return 0; }
-	discover_websites() {
-		printf '%s\n' '[{"serverId":11,"name":"site","ipv4":"8.8.8.8","policyId":12,"cluster":"cluster"}]'
-	}
 	core() {
-		printf '%s\n' '{"ipv4":"8.8.8.8","serverId":11,"policyId":12}'
+		case "$1" in
+			discover-websites)
+				printf 'DISCOVER\n' >>"$calls"
+				printf '%s\n' '[{"serverId":11,"name":"site","ipv4":"8.8.8.8","policyId":12,"clusterId":7,"cluster":"cluster","nodeOnline":true}]'
+				;;
+			run-once)
+				if [[ " $* " == *" --apply "* ]]; then
+					printf 'APPLY_MUTATION\n' >>"$calls"
+					return 97
+				fi
+				local config_path="$3"
+				[ -f "$config_path" ] || fail "pending target config was not generated"
+				grep -F 'endpoint: http://127.0.0.1:8002' "$config_path" >/dev/null || fail "target endpoint missing"
+				grep -F 'name: edges' "$config_path" >/dev/null || fail "target database missing"
+				printf 'DRY_RUN_CONFIG_OK\n' >>"$calls"
+				printf '%s\n' '{"ipv4":"8.8.8.8","serverId":11,"policyId":12}'
+				;;
+			*)
+				printf 'UNEXPECTED_CORE_CALL=%s\n' "$1" >>"$calls"
+				return 98
+				;;
+		esac
 	}
 	output=$(GOEDGE_IP_CERT_TEST_MODE=1 apply_new_website <<< $'1\nn')
 	assert_contains "$output" "未创建 ACME order"
+	[ "$(grep -c '^DISCOVER$' "$calls")" -eq 1 ] || fail "website discovery did not use installed manager path"
+	[ "$(grep -c '^DRY_RUN_CONFIG_OK$' "$calls")" -eq 1 ] || fail "target config/dry-run was not completed"
+	! grep -q 'MUTATION\|UNEXPECTED' "$calls" || fail "cancel path reached a mutating/unexpected core call"
 	if compgen -G "$tmp/etc/goedge-ip-cert/targets.d/*.yaml" >/dev/null; then
 		fail "cancelled target was registered for timer"
 	fi

@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.0-preview.3 - 2026-09-08
+
+Manager runtime fix.
+
+### Fixed
+
+- Load `GOEDGE_ENDPOINT` and `DATABASE_NAME` in the parent manager shell before website discovery command substitution.
+- Cover the fresh installed-manager path from unmanaged public IPv4 discovery through generated target config, successful dry-run and explicit cancellation without apply.
+
+### Safety
+
+- No core ACME, HTTP-01, lifecycle, Policy or rollback behavior changed.
+- Cancellation still removes the pending target config and never executes `--apply`.
+
 ## v0.1.0-preview.2 - 2026-09-08
 
 Installer and multi-IP management preview.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly RELEASE_TAG="v0.1.0-preview.2"
+readonly RELEASE_TAG="v0.1.0-preview.3"
 readonly REPOSITORY="pixingzoudaiyuexing/goedge-ip-cert"
 readonly SERVICE_USER="${GOEDGE_IP_CERT_SERVICE_USER:-goedge-ip-cert}"
 readonly SERVICE_GROUP="${GOEDGE_IP_CERT_SERVICE_GROUP:-goedge-ip-cert}"
@@ -400,6 +400,7 @@ apply_new_website() {
 	require_root
 	local data count index row ipv4 name cluster config final_config dry answer status cert_id policy_id is_new
 	acquire_global_lock
+	load_manager_config
 	data=$(discover_websites)
 	count=$(jq 'length' <<<"$data")
 	[ "$count" -gt 0 ] || die "没有发现符合条件的单公网 IPv4 网站"
