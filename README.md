@@ -2,7 +2,7 @@
 
 独立的 GoEdge 公网 IPv4 证书集成服务，通过 Let's Encrypt ACME `ip` identifier、`shortlived` profile 和 HTTP-01，为 GoEdge Server 签发并自动续期受信任的 IPv4 HTTPS 证书。
 
-> **Status: Preview (`v0.1.0-preview.4`)**
+> **Status: Preview (`v0.1.0-preview.5`)**
 >
 > 已在隔离测试 Node / Cluster 上真实验证 Let's Encrypt Production IPv4签发、HTTP-01、系统信任 TLS、同 Cert ID续期、GoEdge Node refresh和 Cluster隔离。多日无人值守自然续期 runtime acceptance仍在进行中。请先在独立测试 Node / Cluster 使用，不要视为 Stable或 Production Ready。
 
@@ -142,6 +142,14 @@ goedge-ip-cert run-once --config /etc/goedge-ip-cert/config.yaml
 goedge-ip-cert run-once --config /etc/goedge-ip-cert/config.yaml --apply
 ```
 
+systemd timer 使用专用安全模式，跳过从未签发的 target 和 `NEEDS_ATTENTION`：
+
+```bash
+goedge-ip-cert run-once --config /etc/goedge-ip-cert/config.yaml --apply --timer
+```
+
+首次签发失败后，只有 Manager 再次完成 dry-run 且用户明确确认，才会使用 `--manual-first-issue-retry` 发起一次重试。不要在自动任务中使用该参数。
+
 不要在未完成独立测试、备份和授权前把 `--apply` 指向生产流量对象。
 
 ## 最小数据库权限
@@ -164,7 +172,8 @@ ON <GOEDGE_DATABASE>.edgeACMEAuthentications
 - certificate/key/SAN/time在写入 GoEdge前本地校验
 - SQLite v2不保存 certificate PEM或 private key
 - rollback目录0700、snapshot 0600，成功后删除
-- persistent exponential backoff，避免 retry/order storm
+- ACTIVE 续期使用 persistent exponential backoff，避免 retry/order storm
+- 首次签发失败进入 `NEEDS_ATTENTION`，timer 不会自动创建新 order
 - `flock(LOCK_EX | LOCK_NB)`阻止本机并发实例
 - SSL Policy只读验证，不自动写入
 - credentials、DSN、PEM、keyAuthorization不进入日志或 Git
@@ -193,7 +202,7 @@ ON <GOEDGE_DATABASE>.edgeACMEAuthentications
 
 ## 开发验证
 
-兼容基线：Go language 1.22、release toolchain Go 1.26.6、lego v4.22.2、GoEdge v1.3.9。
+兼容基线：Go language 1.24、release toolchain Go 1.26.6、lego v4.25.2、GoEdge v1.3.9。
 
 ```bash
 go mod verify

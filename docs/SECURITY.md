@@ -44,6 +44,10 @@ GoEdge REST client 强制 `CheckRedirect = http.ErrUseLastResponse`。301、302�
 
 Cert Manager 没有任何 SSL Policy 写方法。它只调用 `findEnabledSSLPolicyConfig` 检查管理员已完成的 enabled cert ref；未绑定时返回 cert ID / policy ID 并停止。
 
+## 首次签发重试
+
+首次签发失败持久标记为 `needs-attention`。hourly timer 不会为从未成功签发的 target 创建或重试 ACME order；Preview 4 遗留首次失败 state 也会先归一化并跳过。只有 Manager 完成新的 dry-run、用户明确输入 `y` 后，才会调用一次专用人工重试模式。ACTIVE 续期仍保留持久 backoff 自动恢复。
+
 ## 日志脱敏
 
 可记录 IPv4、cert ID、policy ID、state、CA URL、expiresAt 和错误类别。`security.Redactor` 清理已知 secret、私钥 PEM、认证 header 和 DSN 密码。日志调用方仍应只输出分类后的稳定错误，不输出原始 HTTP body 或数据库 DSN。

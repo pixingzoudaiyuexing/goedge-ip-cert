@@ -58,6 +58,7 @@ type targetStatusResult struct {
 	RenewBefore   string `json:"renewBefore"`
 	NextRenewalAt int64  `json:"nextRenewalAt"`
 	LastSuccessAt int64  `json:"lastSuccessAt"`
+	LastFailureAt int64  `json:"lastFailureAt"`
 	LastError     string `json:"lastError"`
 	SystemTrust   bool   `json:"systemTrust"`
 	HTTPSStatus   string `json:"httpsStatus"`
@@ -110,6 +111,10 @@ func targetStatus(args []string) error {
 		return managedErr
 	} else if operation, opErr := store.LatestOperation(context.Background(), cfg.Target.IPv4); opErr == nil {
 		result.CertID, result.State, result.LastError = operation.CertID, string(operation.Stage), operation.ErrorMessage
+		result.LastFailureAt = operation.UpdatedAt / int64(time.Second)
+		if state.IsFirstIssueFailure(operation) {
+			result.State = string(state.StateNeedsAttention)
+		}
 		if result.ServerID == 0 {
 			result.ServerID, result.PolicyID = operation.ServerID, operation.PolicyID
 		}

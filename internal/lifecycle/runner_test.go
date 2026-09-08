@@ -288,7 +288,7 @@ func TestIssueRecoversEveryPersistedCrashPointWithoutDuplicateCert(t *testing.T)
 	}
 }
 
-func TestCrashAfterIssuanceUsesBackoffThenReissues(t *testing.T) {
+func TestCrashAfterIssuanceRequiresExplicitFirstIssueRetry(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "state.db")
 	now := time.Date(2026, 9, 7, 0, 0, 0, 0, time.UTC)
@@ -321,8 +321,15 @@ func TestCrashAfterIssuanceUsesBackoffThenReissues(t *testing.T) {
 	if err := runner.RunOnce(ctx, "8.8.8.8"); err != nil {
 		t.Fatal(err)
 	}
+	if issuer.calls != 1 || edge.createCalls != 0 {
+		t.Fatalf("first issuance crash retried automatically: issuer=%d create=%d", issuer.calls, edge.createCalls)
+	}
+	runner.Mode = RunModeManualFirstIssueRetry
+	if err := runner.RunOnce(ctx, "8.8.8.8"); err != nil {
+		t.Fatal(err)
+	}
 	if issuer.calls != 2 || edge.createCalls != 1 {
-		t.Fatalf("backoff reissue missing: issuer=%d create=%d", issuer.calls, edge.createCalls)
+		t.Fatalf("explicit retry did not recover issuance: issuer=%d create=%d", issuer.calls, edge.createCalls)
 	}
 }
 
@@ -518,57 +525,220 @@ func (i *wrongIPIssuer) Obtain(context.Context, string, string) (acmeclient.Issu
 	return acmeclient.IssuedCertificate{Certificate: certPEM, PrivateKey: keyPEM}, err
 }
 
-func TestACMEFailureBackoffSurvivesRestart(t *testing.T) {
+func TestFirstIssuanceFailureDoesNotRetryAfterBackoff(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "state.db")
-	now := time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC)
-	edge := newFakeEdge()
-	edge.bindOnCreate = true
+	now := time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC)
+	store := openLifecycleState(t, filepath.Join(t.TempDir(), "state.db"))
 	issuer := &fakeIssuer{now: &now, err: errors.New("temporary CA outage")}
-	store := openLifecycleState(t, path)
-	runner := newRunner(store, edge, issuer, &now)
+	runner := newRunner(store, newFakeEdge(), issuer, &now)
+
+	if err := runner.RunOnce(ctx, "8.8.8.8"); err == nil {
+		t.Fatal("first issuance failure was ignored")
+	}
+	now = now.Add(16 * time.Minute)
+	if err := runner.RunOnce(ctx, "8.8.8.8"); err != nil {
+		t.Fatalf("paused first issuance returned an error: %v", err)
+	}
+	if issuer.calls != 1 {
+		t.Fatalf("first issuance was retried automatically, calls=%d", issuer.calls)
+	}
+	op, err := store.LatestOperation(ctx, "8.8.8.8")
+	if err != nil || op.Stage != state.StateError || op.Kind != state.OperationIssue || op.CertID != 0 ||
+		op.RecoveryMarker != state.RecoveryNeedsAttention || op.RetryCount != 1 || op.ErrorMessage == "" {
+		t.Fatalf("operation=%+v err=%v", op, err)
+	}
+}
+
+func TestNeedsAttentionTimerTenRunsDoNotRetry(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC)
+	issuer := &fakeIssuer{now: &now, err: errors.New("temporary CA outage")}
+	store := openLifecycleState(t, filepath.Join(t.TempDir(), "state.db"))
+	runner := newRunner(store, newFakeEdge(), issuer, &now)
 	if err := runner.RunOnce(ctx, "8.8.8.8"); err == nil {
 		t.Fatal("ACME failure was ignored")
 	}
+	runner.Mode = RunModeTimer
+	now = now.Add(24 * time.Hour)
+	for range 10 {
+		if err := runner.RunOnce(ctx, "8.8.8.8"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if issuer.calls != 1 {
-		t.Fatalf("issuer calls=%d", issuer.calls)
+		t.Fatalf("timer retried NEEDS_ATTENTION target, calls=%d", issuer.calls)
+	}
+}
+
+func TestNeedsAttentionSurvivesStoreRestart(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "state.db")
+	now := time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC)
+	issuer := &fakeIssuer{now: &now, err: errors.New("temporary CA outage")}
+	store := openLifecycleState(t, path)
+	runner := newRunner(store, newFakeEdge(), issuer, &now)
+	if err := runner.RunOnce(ctx, "8.8.8.8"); err == nil {
+		t.Fatal("ACME failure was ignored")
 	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
 	store = reopenLifecycleState(t, path)
-	runner = newRunner(store, edge, issuer, &now)
+	runner = newRunner(store, newFakeEdge(), issuer, &now)
+	runner.Mode = RunModeTimer
+	now = now.Add(24 * time.Hour)
 	if err := runner.RunOnce(ctx, "8.8.8.8"); err != nil {
 		t.Fatal(err)
 	}
 	if issuer.calls != 1 {
-		t.Fatalf("backoff did not suppress retry, calls=%d", issuer.calls)
+		t.Fatalf("restart lost NEEDS_ATTENTION pause, calls=%d", issuer.calls)
+	}
+}
+
+func TestManualFirstIssueRetryRequiresExplicitMode(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC)
+	issuer := &fakeIssuer{now: &now, err: errors.New("temporary CA outage")}
+	store := openLifecycleState(t, filepath.Join(t.TempDir(), "state.db"))
+	runner := newRunner(store, newFakeEdge(), issuer, &now)
+	if err := runner.RunOnce(ctx, "8.8.8.8"); err == nil {
+		t.Fatal("ACME failure was ignored")
+	}
+	now = now.Add(24 * time.Hour)
+	if err := runner.RunOnce(ctx, "8.8.8.8"); err != nil {
+		t.Fatal(err)
+	}
+	if issuer.calls != 1 {
+		t.Fatalf("manual path retried without explicit confirmation mode, calls=%d", issuer.calls)
+	}
+	runner.Mode = RunModeManualFirstIssueRetry
+	if err := runner.RunOnce(ctx, "8.8.8.8"); err == nil {
+		t.Fatal("explicit retry failure was ignored")
+	}
+	if issuer.calls != 2 {
+		t.Fatalf("explicit confirmation did not cause exactly one retry, calls=%d", issuer.calls)
+	}
+}
+
+func TestTimerNeverStartsFirstIssuance(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC)
+	issuer := &fakeIssuer{now: &now}
+	store := openLifecycleState(t, filepath.Join(t.TempDir(), "state.db"))
+	runner := newRunner(store, newFakeEdge(), issuer, &now)
+	runner.Mode = RunModeTimer
+	if err := runner.RunOnce(ctx, "8.8.8.8"); err != nil {
+		t.Fatal(err)
+	}
+	if issuer.calls != 0 {
+		t.Fatalf("timer started first issuance, calls=%d", issuer.calls)
+	}
+}
+
+func TestManualRetryModeRejectsFreshTarget(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC)
+	issuer := &fakeIssuer{now: &now}
+	store := openLifecycleState(t, filepath.Join(t.TempDir(), "state.db"))
+	runner := newRunner(store, newFakeEdge(), issuer, &now)
+	runner.Mode = RunModeManualFirstIssueRetry
+	if err := runner.RunOnce(ctx, "8.8.8.8"); err == nil {
+		t.Fatal("manual retry mode accepted a fresh target")
+	}
+	if issuer.calls != 0 {
+		t.Fatalf("manual retry mode created a fresh order, calls=%d", issuer.calls)
+	}
+}
+
+func TestActiveRenewalFailureKeepsAutomaticBackoffRetry(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC)
+	edge := newFakeEdge()
+	edge.bindOnCreate = true
+	issuer := &fakeIssuer{now: &now}
+	store := openLifecycleState(t, filepath.Join(t.TempDir(), "state.db"))
+	runner := newRunner(store, edge, issuer, &now)
+	if err := runner.RunOnce(ctx, "8.8.8.8"); err != nil {
+		t.Fatal(err)
+	}
+	managed, err := store.Managed(ctx, "8.8.8.8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = time.Unix(managed.NextRenewalAt+1, 0)
+	issuer.err = errors.New("temporary CA outage")
+	runner.Mode = RunModeTimer
+	if err := runner.RunOnce(ctx, "8.8.8.8"); err == nil {
+		t.Fatal("renewal failure was ignored")
+	}
+	if issuer.calls != 2 {
+		t.Fatalf("first renewal attempt calls=%d", issuer.calls)
+	}
+	if err := runner.RunOnce(ctx, "8.8.8.8"); err != nil {
+		t.Fatal(err)
+	}
+	if issuer.calls != 2 {
+		t.Fatalf("renewal backoff did not suppress retry, calls=%d", issuer.calls)
 	}
 	now = now.Add(16 * time.Minute)
 	if err := runner.RunOnce(ctx, "8.8.8.8"); err == nil {
-		t.Fatal("second ACME failure was ignored")
-	}
-	if issuer.calls != 2 {
-		t.Fatalf("second retry did not run, calls=%d", issuer.calls)
-	}
-	retry, err := store.LatestRetry(ctx, "8.8.8.8")
-	if err != nil || retry.Attempt != 2 || retry.NextAt != now.Add(30*time.Minute).Unix() {
-		t.Fatalf("persisted retry=%+v err=%v, want attempt=2 next=%d", retry, err, now.Add(30*time.Minute).Unix())
-	}
-	now = now.Add(20 * time.Minute)
-	if err := runner.RunOnce(ctx, "8.8.8.8"); err != nil {
-		t.Fatal(err)
-	}
-	if issuer.calls != 2 {
-		t.Fatalf("persisted exponential backoff did not suppress retry, calls=%d", issuer.calls)
-	}
-	now = now.Add(11 * time.Minute)
-	issuer.err = nil
-	if err := runner.RunOnce(ctx, "8.8.8.8"); err != nil {
-		t.Fatal(err)
+		t.Fatal("automatic renewal retry failure was ignored")
 	}
 	if issuer.calls != 3 {
-		t.Fatalf("retry did not run after backoff, calls=%d", issuer.calls)
+		t.Fatalf("automatic renewal retry did not run, calls=%d", issuer.calls)
+	}
+	after, err := store.Managed(ctx, "8.8.8.8")
+	if err != nil || after.CertID != managed.CertID || edge.createCalls != 1 || edge.updateCalls != 0 {
+		t.Fatalf("managed=%+v err=%v create=%d update=%d", after, err, edge.createCalls, edge.updateCalls)
+	}
+}
+
+func TestCertCreatedTimerOnlyChecksBinding(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC)
+	edge := newFakeEdge()
+	issuer := &fakeIssuer{now: &now}
+	store := openLifecycleState(t, filepath.Join(t.TempDir(), "state.db"))
+	runner := newRunner(store, edge, issuer, &now)
+	if err := runner.RunOnce(ctx, "8.8.8.8"); !errors.Is(err, goedge.ErrCertificateNotBound) {
+		t.Fatalf("initial binding result=%v", err)
+	}
+	runner.Mode = RunModeTimer
+	for range 3 {
+		if err := runner.RunOnce(ctx, "8.8.8.8"); !errors.Is(err, goedge.ErrCertificateNotBound) {
+			t.Fatalf("timer binding result=%v", err)
+		}
+	}
+	if issuer.calls != 1 || edge.createCalls != 1 || len(edge.certs) != 1 {
+		t.Fatalf("issuer=%d create=%d certs=%d", issuer.calls, edge.createCalls, len(edge.certs))
+	}
+}
+
+func TestLegacyFirstIssueErrorIsNormalizedAndSkipped(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC)
+	store := openLifecycleState(t, filepath.Join(t.TempDir(), "state.db"))
+	op := state.Operation{ID: "legacy-preview4", IPv4: "8.8.8.8", Kind: state.OperationIssue,
+		Stage: state.StateNew, Marker: "legacy-marker", ServerID: 117, PolicyID: 113}
+	if err := store.CreateOperation(ctx, op); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Transition(ctx, op.ID, state.StateNew, state.StateChallengePresent, "awaiting-acme"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetErrorWithRetry(ctx, op.ID, state.StateChallengePresent, "transient", "ACME issuance failed",
+		"retry-new-order", 2, now.Add(-time.Hour).Unix()); err != nil {
+		t.Fatal(err)
+	}
+	issuer := &fakeIssuer{now: &now}
+	runner := newRunner(store, newFakeEdge(), issuer, &now)
+	runner.Mode = RunModeTimer
+	if err := runner.RunOnce(ctx, "8.8.8.8"); err != nil {
+		t.Fatal(err)
+	}
+	latest, err := store.LatestOperation(ctx, "8.8.8.8")
+	if err != nil || latest.RecoveryMarker != state.RecoveryNeedsAttention || latest.RetryCount != 2 || issuer.calls != 0 {
+		t.Fatalf("operation=%+v issuer=%d err=%v", latest, issuer.calls, err)
 	}
 }
 

@@ -421,6 +421,18 @@ func (s *Store) LatestOperation(ctx context.Context, ip string) (Operation, erro
 	return s.Operation(ctx, id)
 }
 
+func (s *Store) NormalizeFirstIssueFailure(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE operations SET recovery_marker=?
+		WHERE id=? AND kind=? AND stage=? AND cert_id=0`, RecoveryNeedsAttention, id, OperationIssue, StateError)
+	if err != nil {
+		return err
+	}
+	if count, _ := result.RowsAffected(); count != 1 {
+		return ErrConflict
+	}
+	return nil
+}
+
 func (s *Store) RecordManagedError(ctx context.Context, ip, category, message, marker string) error {
 	result, err := s.db.ExecContext(ctx, `UPDATE managed_certs SET state=?, last_error_category=?, last_error=?, recovery_marker=? WHERE ipv4=?`,
 		StateError, category, message, marker, ip)

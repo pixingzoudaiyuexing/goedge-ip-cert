@@ -13,12 +13,15 @@ const (
 	StateActive           LifecycleState = "ACTIVE"
 	StateRenewing         LifecycleState = "RENEWING"
 	StateError            LifecycleState = "ERROR"
+	StateNeedsAttention   LifecycleState = "NEEDS_ATTENTION"
 )
 
 const (
 	OperationIssue = "issue"
 	OperationRenew = "renew"
 )
+
+const RecoveryNeedsAttention = "needs-attention"
 
 var (
 	ErrNotFound = errors.New("state: not found")
@@ -64,4 +67,8 @@ type Operation struct {
 type RetryInfo struct {
 	Attempt int
 	NextAt  int64
+}
+
+func IsFirstIssueFailure(operation Operation) bool {
+	return operation.Kind == OperationIssue && operation.Stage == StateError && operation.CertID == 0
 }

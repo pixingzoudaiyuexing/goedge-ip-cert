@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly RELEASE_TAG="v0.1.0-preview.4"
+readonly RELEASE_TAG="v0.1.0-preview.5"
 readonly REPOSITORY="pixingzoudaiyuexing/goedge-ip-cert"
 readonly SERVICE_USER="${GOEDGE_IP_CERT_SERVICE_USER:-goedge-ip-cert}"
 readonly SERVICE_GROUP="${GOEDGE_IP_CERT_SERVICE_GROUP:-goedge-ip-cert}"
@@ -396,9 +396,20 @@ discover_websites() {
 		--access-key-file /etc/goedge-ip-cert/credentials/goedge-access-key
 }
 
+format_failure_time() {
+	local timestamp="$1"
+	if [[ "$timestamp" =~ ^[0-9]+$ ]] && [ "$timestamp" -gt 0 ]; then
+		TZ=Asia/Shanghai date -d "@$timestamp" '+%Y-%m-%d %H:%M:%S +08:00' 2>/dev/null ||
+			TZ=Asia/Shanghai date -r "$timestamp" '+%Y-%m-%d %H:%M:%S +08:00' 2>/dev/null || printf '未知'
+	else
+		printf '未知'
+	fi
+}
+
 apply_new_website() {
 	require_root
 	local data count index row ipv4 name cluster config final_config dry answer status cert_id policy_id is_new
+	local target_status target_state last_error last_failure retry_first_issue
 	acquire_global_lock
 	load_manager_config
 	data=$(discover_websites)
@@ -411,7 +422,13 @@ apply_new_website() {
 		name=$(jq -r '.name' <<<"$row")
 		cluster=$(jq -r '.cluster' <<<"$row")
 		status="未申请"
-		[ -f "$(target_config_path "$ipv4")" ] && status="已管理"
+		if [ -f "$(target_config_path "$ipv4")" ]; then
+			status="已管理"
+			target_status=$(core target-status --config "$(target_config_path "$ipv4")" 2>/dev/null || true)
+			if jq -e . >/dev/null 2>&1 <<<"$target_status"; then
+				status=$(status_label "$(jq -r '.state' <<<"$target_status")")
+			fi
+		fi
 		printf '\n[%d] %s\n    IPv4: %s\n    集群: %s\n    状态: %s\n' "$((index+1))" "$name" "$ipv4" "$cluster" "$status"
 	done
 	printf '\n请选择编号: '
@@ -429,19 +446,34 @@ apply_new_website() {
 		is_new=1
 	fi
 	write_target_config "$ipv4" "$config"
+	retry_first_issue=0
+	target_status=$(core target-status --config "$config")
+	target_state=$(jq -r '.state' <<<"$target_status")
+	if [ "$target_state" = "NEEDS_ATTENTION" ]; then
+		retry_first_issue=1
+		last_error=$(jq -r '.lastError // ""' <<<"$target_status")
+		last_failure=$(jq -r '.lastFailureAt // 0' <<<"$target_status")
+		printf '\n当前状态: 首次申请失败 / 需要处理\n上次失败原因: %s\n上次失败时间: %s\n' "$last_error" "$(format_failure_time "$last_failure")"
+	fi
 	dry=$(mktemp)
 	core run-once --config "$config" >"$dry"
 	[ "$(jq -r '.IPv4' "$dry")" = "$ipv4" ] || die "dry-run 目标不一致"
 	[ "$(jq -r '.ServerID' "$dry")" = "$(jq -r '.serverId' <<<"$row")" ] || die "dry-run Server 不一致"
 	[ "$(jq -r '.PolicyID' "$dry")" = "$(jq -r '.policyId' <<<"$row")" ] || die "dry-run Policy 不一致"
-	printf '\n网站: %s\nIPv4: %s\n集群: %s\nDry-run: PASS\n确认向 Let\047s Encrypt Production 申请 shortlived 证书？[y/N] ' "$name" "$ipv4" "$cluster"
+	if [ "$retry_first_issue" -eq 1 ]; then
+		printf '\n网站: %s\nIPv4: %s\n集群: %s\nDry-run: PASS\n重新尝试首次申请？[y/N] ' "$name" "$ipv4" "$cluster"
+	else
+		printf '\n网站: %s\nIPv4: %s\n集群: %s\nDry-run: PASS\n确认向 Let\047s Encrypt Production 申请 shortlived 证书？[y/N] ' "$name" "$ipv4" "$cluster"
+	fi
 	IFS= read -r answer
 	[ "$answer" = "y" ] || [ "$answer" = "Y" ] || { [ "$is_new" -eq 0 ] || rm -f "$config"; rm -f "$dry"; release_global_lock; say "已取消，未创建 ACME order。"; return 0; }
 	if [ "$is_new" -eq 1 ]; then
 		mv "$config" "$final_config"
 		config="$final_config"
 	fi
-	if ! core run-once --config "$config" --apply; then
+	local apply_args=(run-once --config "$config" --apply)
+	[ "$retry_first_issue" -eq 0 ] || apply_args+=(--manual-first-issue-retry)
+	if ! core "${apply_args[@]}"; then
 		status=$(core target-status --config "$config")
 		cert_id=$(jq -r '.certId' <<<"$status")
 		policy_id=$(jq -r '.policyId' <<<"$status")
@@ -465,6 +497,7 @@ status_label() {
 	case "$1" in
 		ACTIVE) printf '正常' ;;
 		CERT_CREATED) printf '待绑定' ;;
+		NEEDS_ATTENTION) printf '首次申请失败 / 需要处理' ;;
 		RENEWING) printf '续期中' ;;
 		ERROR) printf '续期失败' ;;
 		*) printf '%s' "$1" ;;
@@ -529,7 +562,7 @@ run_all() {
 	shopt -s nullglob
 	local configs=("$(path /etc/goedge-ip-cert/targets.d)"/*.yaml)
 	for config in "${configs[@]}"; do
-		core run-once --config "$config" --apply || result=1
+		core run-once --config "$config" --apply --timer || result=1
 	done
 	return "$result"
 }

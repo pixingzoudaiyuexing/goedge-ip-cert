@@ -114,7 +114,7 @@ test_cancelled_dry_run_is_not_registered() {
 	printf 'fixture\n' >"$tmp/etc/goedge-ip-cert/credentials/goedge-access-key-id"
 	printf 'fixture\n' >"$tmp/etc/goedge-ip-cert/credentials/goedge-access-key"
 	printf 'fixture\n' >"$tmp/etc/goedge-ip-cert/credentials/mysql-dsn"
-	printf 'v0.1.0-preview.4\n' >"$tmp/etc/goedge-ip-cert/installed-version"
+	printf 'v0.1.0-preview.5\n' >"$tmp/etc/goedge-ip-cert/installed-version"
 	printf 'DATABASE_NAME=edges\n' >"$tmp/etc/goedge-ip-cert/manager.conf"
 	calls="$tmp/calls"
 	flock() { return 0; }
@@ -123,6 +123,9 @@ test_cancelled_dry_run_is_not_registered() {
 			discover-websites)
 				printf 'DISCOVER\n' >>"$calls"
 				printf '%s\n' '[{"serverId":11,"name":"site","ipv4":"8.8.8.8","policyId":12,"clusterId":7,"cluster":"cluster","nodeOnline":true}]'
+				;;
+			target-status)
+				printf '%s\n' '{"ipv4":"8.8.8.8","state":"未申请","certId":0,"lastError":"","lastFailureAt":0}'
 				;;
 			run-once)
 				if [[ " $* " == *" --apply "* ]]; then
@@ -170,10 +173,49 @@ test_multiple_target_serial_runner() {
 	core() { printf '%s\n' "$*" >>"$calls"; }
 	run_all
 	[ "$(wc -l <"$calls" | tr -d ' ')" -eq 2 ] || fail "target count"
-	[ "$(sed -n '1p' "$calls")" = "run-once --config $tmp/etc/goedge-ip-cert/targets.d/8.8.8.8.yaml --apply" ] || fail "targets not serial/sorted"
+	[ "$(sed -n '1p' "$calls")" = "run-once --config $tmp/etc/goedge-ip-cert/targets.d/8.8.8.8.yaml --apply --timer" ] || fail "targets not serial/sorted"
 	rm -rf "$tmp"
 	ROOT_PREFIX=""
 	pass "multiple target isolation and serial global runner"
+}
+
+test_needs_attention_requires_explicit_retry_confirmation() {
+	local tmp output calls
+	tmp=$(mktemp -d)
+	ROOT_PREFIX="$tmp"
+	mkdir -p "$tmp/etc/goedge-ip-cert/credentials" "$tmp/etc/goedge-ip-cert/targets.d" "$tmp/var/lib/goedge-ip-cert/targets"
+	printf 'DATABASE_NAME=edges\n' >"$tmp/etc/goedge-ip-cert/manager.conf"
+	: >"$tmp/etc/goedge-ip-cert/targets.d/8.8.8.8.yaml"
+	calls="$tmp/calls"
+	flock() { return 0; }
+	core() {
+		case "$1" in
+			discover-websites)
+				printf '%s\n' '[{"serverId":11,"name":"site","ipv4":"8.8.8.8","policyId":12,"clusterId":7,"cluster":"cluster","nodeOnline":true}]'
+				;;
+			target-status)
+				printf '%s\n' '{"ipv4":"8.8.8.8","state":"NEEDS_ATTENTION","certId":0,"lastError":"ACME issuance failed","lastFailureAt":1788825600}'
+				;;
+			run-once)
+				printf '%s\n' "$*" >>"$calls"
+				if [[ " $* " != *" --apply "* ]]; then
+					printf '%s\n' '{"IPv4":"8.8.8.8","ServerID":11,"PolicyID":12}'
+				fi
+				;;
+			*) return 98 ;;
+		esac
+	}
+	output=$(GOEDGE_IP_CERT_TEST_MODE=1 apply_new_website <<< $'1\nn')
+	assert_contains "$output" "首次申请失败 / 需要处理"
+	assert_contains "$output" "上次失败原因: ACME issuance failed"
+	assert_contains "$output" "重新尝试首次申请？[y/N]"
+	[ "$(grep -c -- '--apply' "$calls" || true)" -eq 0 ] || fail "retry ran without confirmation"
+	output=$(GOEDGE_IP_CERT_TEST_MODE=1 apply_new_website <<< $'1\ny')
+	[ "$(grep -c -- '--manual-first-issue-retry' "$calls" || true)" -eq 1 ] || fail "confirmed retry did not pass explicit mode"
+	[ "$(grep -c -- '--apply' "$calls" || true)" -eq 1 ] || fail "confirmed retry did not make exactly one apply call"
+	rm -rf "$tmp"
+	ROOT_PREFIX=""
+	pass "NEEDS_ATTENTION requires explicit first-issue retry confirmation"
 }
 
 test_status_pending_and_bound_views() {
@@ -262,6 +304,7 @@ test_existing_installation_fails_closed
 test_existing_target_is_not_overwritten
 test_cancelled_dry_run_is_not_registered
 test_multiple_target_serial_runner
+test_needs_attention_requires_explicit_retry_confirmation
 test_status_pending_and_bound_views
 test_update_checksum_failure_preserves_binary
 test_backup_restore_and_uninstall_safety

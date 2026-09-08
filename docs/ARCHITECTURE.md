@@ -4,7 +4,7 @@
 
 ```text
 systemd timer
-  -> goedge-ip-cert run-once --apply
+  -> goedge-ip-cert run-once --apply --timer
       -> lego: IP identifier + shortlived + HTTP-01
       -> Challenge Store: edgeACMEAuthentications INSERT/DELETE
       -> GoEdge Client: 原版 EdgeAPI REST
@@ -28,6 +28,8 @@ goedge -> net/http
 ```
 
 Integration Service 不 import EdgeAPI/EdgeCommon/EdgePlus。GoEdge 业务契约由 fake REST fixture 固化。
+
+`--timer` 是调度安全边界：它只处理已建立 lifecycle 的目标，不启动首次签发，并跳过 `NEEDS_ATTENTION`。首次失败的人工重试只能由 Manager 完成 dry-run 和默认拒绝确认后，以独立模式执行一次。
 
 ## 数据所有权
 

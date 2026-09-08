@@ -81,7 +81,7 @@ func captureNewOrder(t *testing.T, request certificate.ObtainForCSRRequest) lego
 	account := &Account{Email: "test@example.com", privateKey: key}
 	var captured legoacme.Order
 	mux := http.NewServeMux()
-	server := httptest.NewServer(mux)
+	server := httptest.NewTLSServer(mux)
 	t.Cleanup(server.Close)
 	mux.HandleFunc("/directory", func(w http.ResponseWriter, _ *http.Request) {
 		writeTestJSON(t, w, http.StatusOK, legoacme.Directory{NewNonceURL: server.URL + "/nonce", NewAccountURL: server.URL + "/account", NewOrderURL: server.URL + "/new-order"})
@@ -107,6 +107,7 @@ func captureNewOrder(t *testing.T, request certificate.ObtainForCSRRequest) lego
 	})
 	config := legoclient.NewConfig(account)
 	config.CADirURL = server.URL + "/directory"
+	config.HTTPClient = server.Client()
 	client, err := legoclient.NewClient(config)
 	if err != nil {
 		t.Fatal(err)

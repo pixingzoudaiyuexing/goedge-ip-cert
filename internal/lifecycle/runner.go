@@ -46,6 +46,14 @@ type TLSVerifier interface {
 	Verify(context.Context, string, string) error
 }
 
+type RunMode uint8
+
+const (
+	RunModeInteractive RunMode = iota
+	RunModeTimer
+	RunModeManualFirstIssueRetry
+)
+
 type Runner struct {
 	State            *state.Store
 	Challenges       challenge.Store
@@ -57,6 +65,7 @@ type Runner struct {
 	AccountReference string
 	Now              func() time.Time
 	Hook             CrashHook
+	Mode             RunMode
 }
 
 type DryRunResult struct {
@@ -78,6 +87,9 @@ func (r *Runner) Validate() error {
 	}
 	if r.Now == nil {
 		r.Now = time.Now
+	}
+	if r.Mode > RunModeManualFirstIssueRetry {
+		return errors.New("lifecycle run mode 无效")
 	}
 	return nil
 }
@@ -146,6 +158,13 @@ func (r *Runner) RunOnce(ctx context.Context, ip string) error {
 	if err := r.recoverOperations(ctx); err != nil {
 		return err
 	}
+	managed, err := r.State.Managed(ctx, ip)
+	if errors.Is(err, state.ErrNotFound) {
+		return r.runFirstIssue(ctx, ip)
+	}
+	if err != nil {
+		return err
+	}
 	retry, err := r.State.LatestRetry(ctx, ip)
 	if err != nil {
 		return err
@@ -154,13 +173,6 @@ func (r *Runner) RunOnce(ctx context.Context, ip string) error {
 		return nil
 	}
 	target, err := r.Edge.DiscoverServer(ctx, ip)
-	if err != nil {
-		return err
-	}
-	managed, err := r.State.Managed(ctx, ip)
-	if errors.Is(err, state.ErrNotFound) {
-		return r.startIssue(ctx, ip, target, retry.Attempt)
-	}
 	if err != nil {
 		return err
 	}
@@ -181,6 +193,37 @@ func (r *Runner) RunOnce(ctx context.Context, ip string) error {
 		return nil
 	}
 	return r.startRenew(ctx, managed, retry.Attempt)
+}
+
+func (r *Runner) runFirstIssue(ctx context.Context, ip string) error {
+	retryAttempt := 0
+	operation, err := r.State.LatestOperation(ctx, ip)
+	if err == nil {
+		if state.IsFirstIssueFailure(operation) {
+			if operation.RecoveryMarker != state.RecoveryNeedsAttention {
+				if err := r.State.NormalizeFirstIssueFailure(ctx, operation.ID); err != nil {
+					return err
+				}
+			}
+			if r.Mode != RunModeManualFirstIssueRetry {
+				return nil
+			}
+			retryAttempt = operation.RetryCount
+		} else {
+			return fmt.Errorf("target 有 %s operation 但没有 managed certificate，拒绝创建新 order", operation.Stage)
+		}
+	} else if err != nil && !errors.Is(err, state.ErrNotFound) {
+		return err
+	} else if r.Mode == RunModeTimer {
+		return nil
+	} else if r.Mode == RunModeManualFirstIssueRetry {
+		return errors.New("target 没有可供手工重试的首次签发失败状态")
+	}
+	target, err := r.Edge.DiscoverServer(ctx, ip)
+	if err != nil {
+		return err
+	}
+	return r.startIssue(ctx, ip, target, retryAttempt)
 }
 
 func (r *Runner) startIssue(ctx context.Context, ip string, target goedge.ServerTarget, retryAttempt int) error {
@@ -218,8 +261,12 @@ func (r *Runner) obtainAndContinue(ctx context.Context, op state.Operation, retr
 	issued, err := r.Issuer.Obtain(ctx, op.ID, op.IPv4)
 	if err != nil {
 		nextRetry := r.Now().Add(r.Schedule.RetryDelay(retryAttempt)).Unix()
+		marker := "retry-new-order"
+		if op.Kind == state.OperationIssue {
+			marker = state.RecoveryNeedsAttention
+		}
 		stateErr := r.State.SetErrorWithRetry(ctx, op.ID, state.StateChallengePresent, string(scheduler.ErrorTransient),
-			"ACME issuance failed", "retry-new-order", retryAttempt+1, nextRetry)
+			"ACME issuance failed", marker, retryAttempt+1, nextRetry)
 		if stateErr != nil {
 			return fmt.Errorf("ACME 失败且无法保存退避状态: %w", stateErr)
 		}

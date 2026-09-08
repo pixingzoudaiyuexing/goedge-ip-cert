@@ -1,6 +1,6 @@
 # 安装与管理指南（Preview）
 
-> `v0.1.0-preview.4` 修复 Manager 未管理网站的 core dry-run JSON 解析。隔离测试环境中的真实 Production CA、系统信任 TLS、同 Cert ID 续期和 Cluster 隔离已经验证；Stage 3T-4 多日无人值守自然续期验收仍在进行，请先在独立 Node / Cluster 使用。
+> `v0.1.0-preview.5` 修复从未成功签发的 target 在首次失败后被 timer 自动重试的问题。隔离测试环境中的真实 Production CA、系统信任 TLS、同 Cert ID 续期和 Cluster 隔离已经验证；Stage 3T-4 多日无人值守自然续期验收仍在进行，请先在独立 Node / Cluster 使用。
 
 ## 前置条件
 
@@ -60,6 +60,8 @@ challenge = HTTP-01
 
 首次签发创建 GoEdge Cert 后会停在 `CERT_CREATED`。请在 EdgeAdmin 对应网站的 HTTPS 页面手工把 Cert ID 绑定到 SSL Policy。管理器不会写 SSL Policy。绑定后再次检测，通过正常系统 trust、IP SAN 和 fingerprint 验证才进入 `ACTIVE`。
 
+首次签发失败会持久进入 `NEEDS_ATTENTION`。hourly timer 只跳过该 target，不会自动创建新的 ACME order。再次从菜单 2 选择该网站时，管理器会显示上次失败信息、重新执行 dry-run，并以默认 `N` 询问是否重试；只有明确输入 `y` 才允许一次新的首次签发尝试。
+
 ## 多 IPv4 与自动续期
 
 ```text
@@ -69,7 +71,7 @@ challenge = HTTP-01
 /var/lib/goedge-ip-cert/targets/<IPv4>/rollback/
 ```
 
-每个 target 的状态、ACME account、Cert ID 与 rollback 完全隔离。timer 每小时启动全局 runner，并按文件名顺序逐个运行；全局 `flock` 禁止并发下单。续期保持 `RenewBefore=72h`，并只更新同一个 Cert ID。
+每个 target 的状态、ACME account、Cert ID 与 rollback 完全隔离。timer 每小时启动全局 runner，并按文件名顺序逐个运行；全局 `flock` 禁止并发下单。timer 不发起首次签发，也不重试 `NEEDS_ATTENTION`；已进入 `ACTIVE` 的证书仍按持久 backoff 自动续期，并只更新同一个 Cert ID。
 
 ```text
 OnCalendar=hourly

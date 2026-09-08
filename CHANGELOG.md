@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.1.0-preview.5 - 2026-09-08
+
+First-issuance failure safety.
+
+### Fixed
+
+- Persist first-issuance failures with a `needs-attention` recovery marker and expose them as `NEEDS_ATTENTION`.
+- Make hourly `run-all` use an explicit timer mode that never initiates first issuance and skips failed never-issued targets.
+- Normalize legacy Preview 4 `ERROR + issue + certId=0` state before it can create another ACME order.
+- Require a fresh dry-run and explicit Manager confirmation before exactly one manual first-issuance retry.
+- Update lego to v4.25.2 and go-jose to v4.1.4 to enforce HTTPS for ACME servers and resolve reachable dependency vulnerabilities; source builds now require Go 1.24 or newer.
+
+### Safety
+
+- ACTIVE certificate renewal keeps its existing persistent automatic backoff and same-Cert-ID behavior.
+- `CERT_CREATED` continues to perform read-only binding checks without a second order.
+- No ACME identifier/profile, CSR, HTTP-01, challenge, certificate REST, Policy, or rollback protocol changed.
+- Preview 5 is not deployed to the Stage 3T-4 runtime while its Preview 4 natural-renewal acceptance is in progress.
+
 ## v0.1.0-preview.4 - 2026-09-08
 
 Manager dry-run contract fix.

@@ -29,7 +29,7 @@ import (
 )
 
 const defaultConfigPath = "/etc/goedge-ip-cert/config.yaml"
-const version = "v0.1.0-preview.4"
+const version = "v0.1.0-preview.5"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -104,16 +104,30 @@ func run(args []string) error {
 		flags := flag.NewFlagSet("run-once", flag.ContinueOnError)
 		path := flags.String("config", defaultConfigPath, "配置文件")
 		apply := flags.Bool("apply", false, "执行签发/续期；默认只 dry-run")
+		timer := flags.Bool("timer", false, "Timer 自动运行；跳过首次签发和 NEEDS_ATTENTION")
+		manualRetry := flags.Bool("manual-first-issue-retry", false, "用户确认后手工重试首次签发")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
-		return runOnce(context.Background(), *path, *apply)
+		if (*timer || *manualRetry) && !*apply {
+			return errors.New("--timer/--manual-first-issue-retry 仅可与 --apply 一起使用")
+		}
+		if *timer && *manualRetry {
+			return errors.New("--timer 与 --manual-first-issue-retry 不能同时使用")
+		}
+		mode := lifecycle.RunModeInteractive
+		if *timer {
+			mode = lifecycle.RunModeTimer
+		} else if *manualRetry {
+			mode = lifecycle.RunModeManualFirstIssueRetry
+		}
+		return runOnce(context.Background(), *path, *apply, mode)
 	default:
 		return fmt.Errorf("未知命令 %q", args[0])
 	}
 }
 
-func runOnce(ctx context.Context, configPath string, apply bool) error {
+func runOnce(ctx context.Context, configPath string, apply bool, mode lifecycle.RunMode) error {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return err
@@ -154,7 +168,7 @@ func runOnce(ctx context.Context, configPath string, apply bool) error {
 		RenewBefore: cfg.Schedule.RenewBefore.Value(), RetryMin: cfg.Schedule.RetryMin.Value(),
 		RetryMax: cfg.Schedule.RetryMax.Value(), JitterMax: cfg.Schedule.JitterMax.Value(),
 	}
-	runner := &lifecycle.Runner{State: stateStore, Challenges: challengeStore, Edge: edgeClient, Schedule: policy, Now: time.Now}
+	runner := &lifecycle.Runner{State: stateStore, Challenges: challengeStore, Edge: edgeClient, Schedule: policy, Now: time.Now, Mode: mode}
 	if !apply {
 		result, err := runner.DryRun(ctx, cfg.Target.IPv4)
 		if err != nil {

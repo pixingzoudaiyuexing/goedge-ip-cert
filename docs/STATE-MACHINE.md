@@ -14,6 +14,8 @@ ACTIVE -> RENEWING -> CHALLENGE_PRESENT -> CERT_ISSUED
        -> CERT_CREATED -> POLICY_BOUND -> ACTIVE
 
 任一步骤可进入 ERROR，并记录 error category 与 recovery marker。
+
+从未成功签发的 `issue` operation 失败时持久保存为 `ERROR + needs-attention`，对 Manager 显示为 `NEEDS_ATTENTION`。这是稳定暂停状态：timer 永远跳过，只有用户重新完成 dry-run 并明确确认后才允许一次新 order。Preview 4 遗留的 `ERROR + issue + certId=0 + retry-new-order` 会在首次运行时原地归一化，不升级 schema。
 ```
 
 状态变更使用 SQLite 事务和 expected-state CAS。operation 在创建前持久化唯一 marker；SQLite 只记录 certificate fingerprint/expiry，不保存 certificate PEM/private key。
@@ -24,7 +26,7 @@ ACTIVE -> RENEWING -> CHALLENGE_PRESENT -> CERT_ISSUED
 2. 读取 pending challenge，只清理自己 journal 中记录的行；
 3. 优先处理 rollback snapshot：验证当前新证书，无法确认则恢复旧证书；
 4. 恢复 `CERT_ISSUED/CERT_CREATED/POLICY_BOUND` operation；
-5. 对没有内存 private key 的 `CERT_ISSUED` 标记持久 backoff，下一次重新签发；
+5. 对没有内存 private key 的首次 `CERT_ISSUED` 标记为需要人工处理，不由 timer 重新签发；
 6. 重新发现 Server，核对本地 server/policy/cert ID；
 7. 未到续期点则无写操作，到期后创建 renew operation。
 
@@ -40,4 +42,4 @@ ACTIVE -> RENEWING -> CHALLENGE_PRESENT -> CERT_ISSUED
 
 ## 续期
 
-160 小时证书默认在剩余 72 小时加确定性 0–10 分钟 jitter 后进入续期。systemd 每小时触发，文件锁阻止本机两个实例并发。临时错误使用 15 分钟至 6 小时的指数退避设计；schema、配置、安全和鉴权错误 fail closed，需人工修复后再运行。
+160 小时证书默认在剩余 72 小时加确定性 0–10 分钟 jitter 后进入续期。systemd 每小时触发，文件锁阻止本机两个实例并发。已经 `ACTIVE` 的证书在续期临时错误后使用 15 分钟至 6 小时的指数退避自动重试；首次签发错误不会自动重试。schema、配置、安全和鉴权错误 fail closed，需人工修复后再运行。

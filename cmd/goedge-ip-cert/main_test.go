@@ -1,6 +1,24 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestRunOnceSafetyModesRequireApplyAndAreMutuallyExclusive(t *testing.T) {
+	for _, args := range [][]string{
+		{"run-once", "--timer"},
+		{"run-once", "--manual-first-issue-retry"},
+	} {
+		if err := run(args); err == nil || !strings.Contains(err.Error(), "仅可与 --apply") {
+			t.Fatalf("args=%v err=%v", args, err)
+		}
+	}
+	err := run([]string{"run-once", "--apply", "--timer", "--manual-first-issue-retry"})
+	if err == nil || !strings.Contains(err.Error(), "不能同时使用") {
+		t.Fatalf("mutually exclusive modes err=%v", err)
+	}
+}
 
 func TestValidateDSNAllowsOnlyExpectedDatabaseAndLocalTransport(t *testing.T) {
 	for _, value := range []string{
