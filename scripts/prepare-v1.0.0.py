@@ -142,7 +142,7 @@ test_func = r'''test_no_eligible_website_shows_https_save_hint() {
 		esac
 	}
 	set +e
-	output=$(GOEDGE_IP_CERT_TEST_MODE=1 apply_new_website 2>&1)
+	output=$(set -e; GOEDGE_IP_CERT_TEST_MODE=1 apply_new_website 2>&1)
 	status=$?
 	set -e
 	[ "$status" -ne 0 ] || fail "empty discovery unexpectedly succeeded"
