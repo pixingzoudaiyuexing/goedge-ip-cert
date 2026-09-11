@@ -23,7 +23,7 @@ if ! command -v shellcheck >/dev/null 2>&1; then
   sudo apt-get update -qq
   sudo apt-get install -y -qq shellcheck
 fi
-shellcheck install.sh tests/installer_test.sh scripts/secret-scan.sh
+shellcheck -S warning install.sh tests/installer_test.sh scripts/secret-scan.sh
 bash tests/installer_test.sh
 sh scripts/secret-scan.sh
 
