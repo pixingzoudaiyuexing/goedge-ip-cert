@@ -114,7 +114,7 @@ test_cancelled_dry_run_is_not_registered() {
 	printf 'fixture\n' >"$tmp/etc/goedge-ip-cert/credentials/goedge-access-key-id"
 	printf 'fixture\n' >"$tmp/etc/goedge-ip-cert/credentials/goedge-access-key"
 	printf 'fixture\n' >"$tmp/etc/goedge-ip-cert/credentials/mysql-dsn"
-	printf 'v0.1.0-preview.5\n' >"$tmp/etc/goedge-ip-cert/installed-version"
+	printf 'v1.0.0\n' >"$tmp/etc/goedge-ip-cert/installed-version"
 	printf 'DATABASE_NAME=edges\n' >"$tmp/etc/goedge-ip-cert/manager.conf"
 	calls="$tmp/calls"
 	flock() { return 0; }
@@ -149,6 +149,7 @@ test_cancelled_dry_run_is_not_registered() {
 	GOEDGE_IP_CERT_TEST_MODE=1 apply_new_website <<< $'1\nn' >"$output_file"
 	output=$(<"$output_file")
 	assert_contains "$output" "未创建 ACME order"
+	assert_contains "$output" "如果刚在 GoEdge 新建的 IP 网站没有出现在列表中"
 	[ "$(grep -c '^DISCOVER$' "$calls")" -eq 1 ] || fail "website discovery did not use installed manager path"
 	[ "$(grep -c '^DRY_RUN_CONFIG_OK$' "$calls")" -eq 1 ] || fail "target config/dry-run was not completed"
 	! grep -q 'MUTATION\|UNEXPECTED' "$calls" || fail "cancel path reached a mutating/unexpected core call"
@@ -158,6 +159,33 @@ test_cancelled_dry_run_is_not_registered() {
 	rm -rf "$tmp"
 	ROOT_PREFIX=""
 	pass "cancelled dry-run cannot be applied by timer"
+}
+
+test_no_eligible_website_shows_https_save_hint() {
+	local tmp output status
+	tmp=$(mktemp -d)
+	ROOT_PREFIX="$tmp"
+	mkdir -p "$tmp/etc/goedge-ip-cert/targets.d" "$tmp/var/lib/goedge-ip-cert"
+	printf 'DATABASE_NAME=edges\n' >"$tmp/etc/goedge-ip-cert/manager.conf"
+	flock() { return 0; }
+	core() {
+		case "$1" in
+			discover-websites) printf '%s\n' '[]' ;;
+			*) return 98 ;;
+		esac
+	}
+	set +e
+	output=$(set -e; GOEDGE_IP_CERT_TEST_MODE=1 apply_new_website 2>&1)
+	status=$?
+	set -e
+	[ "$status" -ne 0 ] || fail "empty discovery unexpectedly succeeded"
+	assert_contains "$output" "没有发现符合条件的单公网 IPv4 网站"
+	assert_contains "$output" "进入该网站的「HTTPS」设置"
+	assert_contains "$output" "设置端口 443"
+	assert_contains "$output" "点击一次「保存」（无需提前选择证书）"
+	rm -rf "$tmp"
+	ROOT_PREFIX=""
+	pass "empty discovery explains GoEdge HTTPS save prerequisite"
 }
 
 test_multiple_target_serial_runner() {
@@ -303,6 +331,7 @@ test_db_config_discovery_and_failure
 test_existing_installation_fails_closed
 test_existing_target_is_not_overwritten
 test_cancelled_dry_run_is_not_registered
+test_no_eligible_website_shows_https_save_hint
 test_multiple_target_serial_runner
 test_needs_attention_requires_explicit_retry_confirmation
 test_status_pending_and_bound_views

@@ -1,7 +1,0 @@
-name: Actions Smoke
-on: push
-jobs:
-  smoke:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo ok

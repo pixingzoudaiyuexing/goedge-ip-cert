@@ -1,6 +1,6 @@
-# 安装与管理指南（Preview）
+# 安装与管理指南（v1.0.0 Stable）
 
-> `v0.1.0-preview.5` 修复从未成功签发的 target 在首次失败后被 timer 自动重试的问题。隔离测试环境中的真实 Production CA、系统信任 TLS、同 Cert ID 续期和 Cluster 隔离已经验证；Stage 3T-4 多日无人值守自然续期验收仍在进行，请先在独立 Node / Cluster 使用。
+> `v1.0.0` 为首个 Stable 版本。真实 Production CA、系统信任 TLS、同 Cert ID 续期、Cluster 隔离与 Stage 3T-4 systemd timer 自然无人值守续期均已验证通过。
 
 ## 前置条件
 
@@ -9,7 +9,7 @@
 - GoEdge v1.3.9 已运行，EdgeAPI 与 MySQL 在本机 loopback 可访问；
 - Node / Cluster 已配置并在线；
 - 已创建网站，网站“域名”仅填写一个规范公网 IPv4；
-- 网站已启用可解析的 HTTPS SSL Policy；
+- 网站已开启 HTTPS、配置 443，并在 HTTPS 设置页点击过一次“保存”（无需提前选择证书）；
 - 已准备专用 GoEdge REST Access Key 与 REST Access Token。
 
 不需要修改或重新编译 EdgeAdmin、EdgeAPI、EdgeNode、EdgeCommon，也不需要输入 Server / Policy / Node / Cluster / Cert ID。
@@ -50,6 +50,8 @@ TO 'goedge_ip_cert'@'127.0.0.1';
 
 管理器只读列出唯一身份为规范公网 IPv4、HTTPS Policy 有效、Cluster 至少有一个已安装启用 Node 的网站。IPv6、private、loopback、reserved 或多身份网站不会显示。
 
+如果刚在 GoEdge 新建的 IP 网站没有出现在菜单 2，请先进入该网站的「HTTPS」设置，确认已开启 HTTPS 并设置 443，然后点击一次「保存」（无需提前选择证书），再重新进入菜单 2。
+
 选择网站后先执行 core dry-run。只有 IPv4、Server ID 与 Policy ID 都和发现结果一致，且用户明确输入 `y`，才会调用 Let's Encrypt Production：
 
 ```text
@@ -88,7 +90,7 @@ AccuracySec=1m
 
 ## 更新
 
-菜单 5 从 GitHub Releases 查询最新非 draft Preview，下载当前架构 binary、manager 与 `SHA256SUMS`。只有 SHA-256 和版本都验证通过才替换；任一替换失败会恢复旧 binary 和 manager。
+菜单 5 从 GitHub Releases 查询最新非 draft、非 prerelease Stable 版本，下载当前架构 binary、manager 与 `SHA256SUMS`。只有 SHA-256 和版本都验证通过才替换；任一替换失败会恢复旧 binary 和 manager。
 
 更新保留 config、credential、ACME account、SQLite state 和 targets。
 

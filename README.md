@@ -2,9 +2,9 @@
 
 独立的 GoEdge 公网 IPv4 证书集成服务，通过 Let's Encrypt ACME `ip` identifier、`shortlived` profile 和 HTTP-01，为 GoEdge Server 签发并自动续期受信任的 IPv4 HTTPS 证书。
 
-> **Status: Preview (`v0.1.0-preview.5`)**
+> **Status: Stable (`v1.0.0`)**
 >
-> 已在隔离测试 Node / Cluster 上真实验证 Let's Encrypt Production IPv4签发、HTTP-01、系统信任 TLS、同 Cert ID续期、GoEdge Node refresh和 Cluster隔离。多日无人值守自然续期 runtime acceptance仍在进行中。请先在独立测试 Node / Cluster 使用，不要视为 Stable或 Production Ready。
+> 已真实验证 Let's Encrypt Production IPv4 签发、HTTP-01、系统信任 TLS、同 Cert ID 续期、GoEdge Node refresh、Cluster 隔离，以及 systemd timer 自然无人值守续期；续期后连续 timer 运行未产生重复 ACME Order。
 
 ## 为什么独立运行
 
@@ -68,7 +68,7 @@ ON <GOEDGE_DATABASE>.edgeACMEAuthentications
 ```text
 安装 GoEdge 1.3.9
   -> 配置 Cluster / Node
-  -> 创建单公网 IPv4 网站并启用 HTTPS Policy
+  -> 创建单公网 IPv4 网站，开启 HTTPS / 443 并在 HTTPS 设置页点击一次“保存”
   -> 运行 install.sh
   -> 菜单选择网站并检查 dry-run
   -> 确认后申请 Let's Encrypt Production shortlived 证书
@@ -78,7 +78,7 @@ ON <GOEDGE_DATABASE>.edgeACMEAuthentications
 
 Server、Policy、Node、Cluster、Cert ID 都由只读 REST 发现，用户无需输入内部 ID。每个 IPv4 使用独立配置、SQLite state、ACME account 与 rollback 目录；全局锁保证多个目标串行处理，不会并发下单。
 
-## Preview支持范围
+## v1.0 支持范围
 
 支持：
 

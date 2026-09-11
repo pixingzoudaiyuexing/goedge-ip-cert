@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.0.0 - 2026-09-12
+
+First stable release.
+
+### Highlights
+
+- Promote the independently reviewed Preview 5 lifecycle and safety behavior to Stable.
+- Production unattended natural renewal is proven with the same GoEdge Cert ID, unchanged SSL Policy, isolated Node refresh and no post-renewal order storm.
+- Add a Menu 2 hint for newly created GoEdge IP websites: enable HTTPS / 443 and click Save once before discovery; no certificate needs to be selected first.
+- Stable update checks ignore draft and prerelease releases and accept stable `vX.Y.Z` tags only.
+
+### Safety
+
+- No ACME identifier/profile, CSR, HTTP-01, challenge, certificate create/update, Policy write boundary, same-Cert-ID renewal or lifecycle semantics changed from Preview 5.
+- First-issuance failures remain `NEEDS_ATTENTION` and are never automatically retried by the hourly timer.
+- First SSL Policy certificate binding remains manual and read-only from Cert Manager.
+
 ## v0.1.0-preview.5 - 2026-09-08
 
 First-issuance failure safety.

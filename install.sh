@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly RELEASE_TAG="v0.1.0-preview.5"
+readonly RELEASE_TAG="v1.0.0"
 readonly REPOSITORY="pixingzoudaiyuexing/goedge-ip-cert"
 readonly SERVICE_USER="${GOEDGE_IP_CERT_SERVICE_USER:-goedge-ip-cert}"
 readonly SERVICE_GROUP="${GOEDGE_IP_CERT_SERVICE_GROUP:-goedge-ip-cert}"
@@ -414,8 +414,9 @@ apply_new_website() {
 	load_manager_config
 	data=$(discover_websites)
 	count=$(jq 'length' <<<"$data")
-	[ "$count" -gt 0 ] || die "没有发现符合条件的单公网 IPv4 网站"
+	[ "$count" -gt 0 ] || die $'没有发现符合条件的单公网 IPv4 网站。\n\n如果刚在 GoEdge 新建了 IP 网站：\n1. 进入该网站的「HTTPS」设置\n2. 开启 HTTPS\n3. 设置端口 443\n4. 点击一次「保存」（无需提前选择证书）\n5. 然后重新进入菜单 2'
 	say "请选择需要申请 IPv4 证书的网站："
+	say "提示：如果刚在 GoEdge 新建的 IP 网站没有出现在列表中，请进入该网站的「HTTPS」设置，确认已开启 HTTPS 并设置 443 端口，然后点击一次「保存」（无需提前选择证书），再重新进入本菜单。"
 	for ((index=0; index<count; index++)); do
 		row=$(jq -c ".[$index]" <<<"$data")
 		ipv4=$(jq -r '.ipv4' <<<"$row")
@@ -584,8 +585,8 @@ update_program() {
 	acquire_global_lock
 	arch=$(detect_arch)
 	latest=$(curl -fsSL --proto '=https' --tlsv1.2 --max-redirs 0 \
-		"https://api.github.com/repos/$REPOSITORY/releases?per_page=20" | jq -r '[.[] | select(.draft == false)][0].tag_name')
-	[[ "$latest" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+$ ]] || die "无法确认 GitHub Preview Release"
+		"https://api.github.com/repos/$REPOSITORY/releases?per_page=20" | jq -r '[.[] | select(.draft == false and .prerelease == false)][0].tag_name')
+	[[ "$latest" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "无法确认 GitHub Stable Release"
 	DOWNLOAD_TAG="$latest"
 	tmp=$(mktemp -d)
 	download_release "goedge-ip-cert-linux-$arch" "$tmp/goedge-ip-cert"
